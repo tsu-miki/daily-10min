@@ -24,6 +24,7 @@
     feedback: document.getElementById("feedback"),
     feedbackResult: document.getElementById("feedback-result"),
     feedbackExplanation: document.getElementById("feedback-explanation"),
+    feedbackDetails: document.getElementById("feedback-details"),
     btnNext: document.getElementById("btn-next"),
     btnQuit: document.getElementById("btn-quit"),
     resultEmoji: document.getElementById("result-emoji"),
@@ -75,6 +76,89 @@
       el.categoryList.appendChild(btn);
     });
     showScreen("home");
+  }
+
+  // ---------------------------------------------
+  // 詳しい解説(コンセプト解説)の描画
+  // ---------------------------------------------
+  function detailSection(heading, text) {
+    const sec = document.createElement("div");
+    sec.className = "detail-section";
+    const h = document.createElement("h4");
+    h.className = "detail-heading";
+    h.textContent = heading;
+    sec.appendChild(h);
+    if (text) {
+      const p = document.createElement("p");
+      p.className = "detail-text";
+      p.textContent = text;
+      sec.appendChild(p);
+    }
+    return sec;
+  }
+
+  function detailCodeBlock(code) {
+    const pre = document.createElement("pre");
+    pre.className = "detail-code";
+    const codeEl = document.createElement("code");
+    codeEl.textContent = code;
+    pre.appendChild(codeEl);
+    return pre;
+  }
+
+  function buildLangTabs(examples) {
+    const sec = detailSection("🌐 言語別の実装例", "");
+    const tabBar = document.createElement("div");
+    tabBar.className = "lang-tabs";
+    const codeBlock = detailCodeBlock(examples[0].code);
+
+    examples.forEach((ex, i) => {
+      const tab = document.createElement("button");
+      tab.type = "button";
+      tab.className = `lang-tab${i === 0 ? " active" : ""}`;
+      tab.textContent = ex.lang;
+      tab.addEventListener("click", () => {
+        tabBar.querySelectorAll(".lang-tab").forEach((t) => t.classList.remove("active"));
+        tab.classList.add("active");
+        codeBlock.querySelector("code").textContent = ex.code;
+      });
+      tabBar.appendChild(tab);
+    });
+
+    sec.appendChild(tabBar);
+    sec.appendChild(codeBlock);
+    return sec;
+  }
+
+  function buildConceptDetails(conceptId) {
+    const c = QUIZ_CONCEPTS[conceptId];
+    if (!c) return null;
+
+    const details = document.createElement("details");
+    details.className = "concept-details";
+
+    const summary = document.createElement("summary");
+    summary.textContent = `📖 詳しい解説:${c.title}`;
+    details.appendChild(summary);
+
+    const body = document.createElement("div");
+    body.className = "concept-body";
+
+    body.appendChild(detailSection(`💡 ${c.title}とは`, c.what));
+
+    const applySec = detailSection("🛠 適用するとこうなる", c.apply.text);
+    applySec.appendChild(detailCodeBlock(c.apply.code));
+    body.appendChild(applySec);
+
+    body.appendChild(detailSection("✨ 何が嬉しいのか", c.benefits));
+    body.appendChild(buildLangTabs(c.langExamples));
+
+    const domainSec = detailSection("🏢 経済情報ドメインでの例(企業と従業員)", c.domain.text);
+    domainSec.appendChild(detailCodeBlock(c.domain.code));
+    body.appendChild(domainSec);
+
+    details.appendChild(body);
+    return details;
   }
 
   // ---------------------------------------------
@@ -185,6 +269,10 @@
     el.feedbackResult.textContent = correct ? "⭕ 正解!" : "❌ 不正解…";
     el.feedbackResult.className = `feedback-result ${correct ? "ok" : "ng"}`;
     el.feedbackExplanation.textContent = q.explanation;
+
+    el.feedbackDetails.innerHTML = "";
+    const conceptDetails = buildConceptDetails(q.conceptId);
+    if (conceptDetails) el.feedbackDetails.appendChild(conceptDetails);
     el.btnNext.textContent =
       session.current + 1 < session.questions.length ? "次の問題へ" : "結果を見る";
     el.feedback.classList.remove("hidden");
@@ -230,6 +318,8 @@
       ansEl.className = "review-a";
       ansEl.textContent = `正解: ${a.question.shuffledChoices[a.question.correctIndex]}`;
       item.append(qEl, ansEl);
+      const conceptDetails = buildConceptDetails(a.question.conceptId);
+      if (conceptDetails) item.appendChild(conceptDetails);
       el.reviewList.appendChild(item);
     });
 

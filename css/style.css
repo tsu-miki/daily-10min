@@ -342,6 +342,110 @@ main {
   white-space: pre-wrap;
 }
 
+/* ---------- 詳しい解説 ---------- */
+.concept-details {
+  margin: 4px 0 14px;
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  background: var(--color-bg);
+  overflow: hidden;
+}
+
+.concept-details summary {
+  cursor: pointer;
+  padding: 12px 14px;
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: var(--color-primary);
+  list-style: none;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+}
+
+@media (prefers-color-scheme: dark) {
+  .concept-details summary {
+    color: #a5b4fc;
+  }
+}
+
+.concept-details summary::-webkit-details-marker {
+  display: none;
+}
+
+.concept-details summary::after {
+  content: "▼";
+  float: right;
+  font-size: 0.7rem;
+  opacity: 0.6;
+  transition: transform 0.2s ease;
+}
+
+.concept-details[open] summary::after {
+  transform: rotate(180deg);
+}
+
+.concept-body {
+  padding: 2px 14px 16px;
+  border-top: 1px solid var(--color-border);
+}
+
+.detail-section {
+  margin-top: 16px;
+}
+
+.detail-heading {
+  font-size: 0.92rem;
+  font-weight: 700;
+  margin-bottom: 6px;
+}
+
+.detail-text {
+  font-size: 0.85rem;
+  color: var(--color-text-sub);
+  white-space: pre-wrap;
+}
+
+.detail-code {
+  margin-top: 10px;
+  background: var(--color-code-bg);
+  color: var(--color-code-text);
+  border-radius: 10px;
+  padding: 12px 14px;
+  overflow-x: auto;
+  font-size: 0.78rem;
+  line-height: 1.6;
+}
+
+.detail-code code {
+  font-family: "SF Mono", Menlo, Consolas, "Courier New", monospace;
+}
+
+.lang-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.lang-tab {
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+  color: var(--color-text-sub);
+  border-radius: 999px;
+  padding: 7px 14px;
+  font: inherit;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.lang-tab.active {
+  background: var(--color-primary);
+  border-color: var(--color-primary);
+  color: #fff;
+}
+
 /* ---------- ボタン ---------- */
 .btn {
   display: block;

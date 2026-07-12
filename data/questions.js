@@ -25,6 +25,7 @@ const QUIZ_DATA = {
     "design-patterns": [
       {
         id: "dp-01",
+        conceptId: "singleton",
         question: "Singletonパターンの主な目的として最も適切なものはどれ?",
         choices: [
           "クラスのインスタンスが1つだけであることを保証し、グローバルなアクセス手段を提供する",
@@ -38,6 +39,7 @@ const QUIZ_DATA = {
       },
       {
         id: "dp-02",
+        conceptId: "adapter",
         question:
           "既存クラスのインターフェースが、利用したい側が期待するインターフェースと合わない。両者の橋渡しをするパターンはどれ?",
         choices: ["Adapter", "Decorator", "Facade", "Bridge"],
@@ -47,6 +49,7 @@ const QUIZ_DATA = {
       },
       {
         id: "dp-03",
+        conceptId: "observer",
         question:
           "「あるオブジェクトの状態が変化したら、それに依存する複数のオブジェクトへ自動的に通知したい」。適切なパターンはどれ?",
         choices: ["Observer", "Mediator", "Command", "Memento"],
@@ -56,6 +59,7 @@ const QUIZ_DATA = {
       },
       {
         id: "dp-04",
+        conceptId: "strategy",
         question:
           "アルゴリズム(例: ソート方法、料金計算方法)を実行時に切り替えられるようにカプセル化するパターンはどれ?",
         choices: ["Strategy", "Template Method", "State", "Visitor"],
@@ -65,6 +69,7 @@ const QUIZ_DATA = {
       },
       {
         id: "dp-05",
+        conceptId: "template-method",
         question:
           "処理の大きな流れ(骨組み)は親クラスで定義し、個々のステップの具体的な実装はサブクラスに任せるパターンはどれ?",
         choices: ["Template Method", "Strategy", "Factory Method", "Builder"],
@@ -74,6 +79,7 @@ const QUIZ_DATA = {
       },
       {
         id: "dp-06",
+        conceptId: "decorator",
         question:
           "既存オブジェクトに対して、継承を使わずに機能を動的に追加していけるパターンはどれ?",
         choices: ["Decorator", "Adapter", "Proxy", "Composite"],
@@ -83,6 +89,7 @@ const QUIZ_DATA = {
       },
       {
         id: "dp-07",
+        conceptId: "facade",
         question:
           "複雑なサブシステム群に対して、シンプルな窓口となるインターフェースを1つ用意するパターンはどれ?",
         choices: ["Facade", "Mediator", "Adapter", "Abstract Factory"],
@@ -92,6 +99,7 @@ const QUIZ_DATA = {
       },
       {
         id: "dp-08",
+        conceptId: "singleton",
         question:
           "次のコードが表しているデザインパターンはどれ?",
         code:
@@ -111,6 +119,7 @@ const QUIZ_DATA = {
       },
       {
         id: "dp-09",
+        conceptId: "command",
         question:
           "「操作(リクエスト)そのものをオブジェクトとして表現する」ことで、取り消し(Undo)や履歴管理、キューイングを可能にするパターンはどれ?",
         choices: ["Command", "Strategy", "Observer", "Chain of Responsibility"],
@@ -120,6 +129,7 @@ const QUIZ_DATA = {
       },
       {
         id: "dp-10",
+        conceptId: "composite",
         question:
           "個々の部品(Leaf)と部品の集まり(Composite)を同じインターフェースで扱い、木構造を表現するパターンはどれ?",
         choices: ["Composite", "Decorator", "Iterator", "Bridge"],
@@ -129,6 +139,7 @@ const QUIZ_DATA = {
       },
       {
         id: "dp-11",
+        conceptId: "factory-method",
         question:
           "Factory Methodパターンの説明として最も適切なものはどれ?",
         choices: [
@@ -143,6 +154,7 @@ const QUIZ_DATA = {
       },
       {
         id: "dp-12",
+        conceptId: "builder",
         question:
           "多数の引数を持つ複雑なオブジェクトを、手順を追って段階的に組み立てられるようにするパターンはどれ?",
         choices: ["Builder", "Abstract Factory", "Prototype", "Singleton"],
@@ -152,6 +164,7 @@ const QUIZ_DATA = {
       },
       {
         id: "dp-13",
+        conceptId: "proxy",
         question:
           "本物のオブジェクトへのアクセスを代理オブジェクトが仲介し、遅延初期化やアクセス制御、キャッシュなどを差し込むパターンはどれ?",
         choices: ["Proxy", "Decorator", "Adapter", "Facade"],
@@ -161,6 +174,7 @@ const QUIZ_DATA = {
       },
       {
         id: "dp-14",
+        conceptId: "chain-of-responsibility",
         question:
           "リクエストを処理できるオブジェクトが見つかるまで、複数のハンドラを鎖のように順番にたどっていくパターンはどれ?",
         choices: ["Chain of Responsibility", "Command", "Mediator", "Iterator"],
@@ -170,6 +184,7 @@ const QUIZ_DATA = {
       },
       {
         id: "dp-15",
+        conceptId: "strategy",
         question:
           "次のコードのように、支払い方法の分岐をオブジェクトの差し替えで表現する設計が使っているパターンはどれ?",
         code:
@@ -190,6 +205,7 @@ class Checkout {
       },
       {
         id: "dp-16",
+        conceptId: "abstract-factory",
         question:
           "Abstract FactoryとFactory Methodの違いの説明として最も適切なものはどれ?",
         choices: [
@@ -210,6 +226,7 @@ class Checkout {
     "solid": [
       {
         id: "so-01",
+        conceptId: "srp",
         question: "SOLID原則の「S」= 単一責任の原則(SRP)の説明として最も適切なものはどれ?",
         choices: [
           "クラスを変更する理由は1つだけであるべき",
@@ -223,6 +240,7 @@ class Checkout {
       },
       {
         id: "so-02",
+        conceptId: "srp",
         question:
           "次のクラスが違反している原則はどれ?",
         code:
@@ -244,6 +262,7 @@ class Checkout {
       },
       {
         id: "so-03",
+        conceptId: "ocp",
         question:
           "オープン・クローズドの原則(OCP)の「拡張に対して開いていて、修正に対して閉じている」の意味として最も適切なものはどれ?",
         choices: [
@@ -258,6 +277,7 @@ class Checkout {
       },
       {
         id: "so-04",
+        conceptId: "ocp",
         question:
           "図形の種類ごとにswitch文で分岐して面積を計算するコードがあり、新しい図形を追加するたびにこの関数を修正している。OCPに沿った改善策として最も適切なものはどれ?",
         code:
@@ -280,6 +300,7 @@ class Checkout {
       },
       {
         id: "so-05",
+        conceptId: "lsp",
         question:
           "リスコフの置換原則(LSP)の説明として最も適切なものはどれ?",
         choices: [
@@ -294,6 +315,7 @@ class Checkout {
       },
       {
         id: "so-06",
+        conceptId: "lsp",
         question:
           "正方形(Square)を長方形(Rectangle)のサブクラスにすると問題になる、という有名な例が示している原則違反はどれ?",
         code:
@@ -314,6 +336,7 @@ r.setHeight(5);
       },
       {
         id: "so-07",
+        conceptId: "isp",
         question:
           "インターフェース分離の原則(ISP)の説明として最も適切なものはどれ?",
         choices: [
@@ -328,6 +351,7 @@ r.setHeight(5);
       },
       {
         id: "so-08",
+        conceptId: "isp",
         question:
           "次のコードが抱える問題に最も関係が深い原則はどれ?",
         code:
@@ -355,6 +379,7 @@ class Robot implements Worker {
       },
       {
         id: "so-09",
+        conceptId: "dip",
         question:
           "依存性逆転の原則(DIP)の説明として最も適切なものはどれ?",
         choices: [
@@ -369,6 +394,7 @@ class Robot implements Worker {
       },
       {
         id: "so-10",
+        conceptId: "dip",
         question:
           "次のコードをDIPに沿って改善する方法として最も適切なものはどれ?",
         code:
@@ -388,6 +414,7 @@ class Robot implements Worker {
       },
       {
         id: "so-11",
+        conceptId: "lsp",
         question:
           "親クラスのメソッドをサブクラスでオーバーライドし、中身を「throw new NotImplementedException()」にした。この設計が主に違反している原則はどれ?",
         choices: [
@@ -402,6 +429,7 @@ class Robot implements Worker {
       },
       {
         id: "so-12",
+        conceptId: "solid-overview",
         question: "SOLID原則を守ることで得られる主な効果として最も適切なものはどれ?",
         choices: [
           "変更に強く、テストしやすく、理解しやすい設計になる",
@@ -415,6 +443,7 @@ class Robot implements Worker {
       },
       {
         id: "so-13",
+        conceptId: "solid-overview",
         question:
           "「通知方法(メール/Slack/SMS)が増えるたびにNotificationServiceのif文を修正している」。この問題の解決に最も直接的に関係する原則の組み合わせはどれ?",
         choices: [
@@ -429,6 +458,7 @@ class Robot implements Worker {
       },
       {
         id: "so-14",
+        conceptId: "srp",
         question:
           "単一責任の原則(SRP)における「責任(責務)」の単位として、提唱者Robert C. Martinの説明に最も近いものはどれ?",
         choices: [
@@ -443,6 +473,7 @@ class Robot implements Worker {
       },
       {
         id: "so-15",
+        conceptId: "dip",
         question:
           "レイヤードアーキテクチャで「ビジネスロジック層がインターフェースを定義し、インフラ層(DB実装)がそれを実装する」構成にする狙いとして最も適切なものはどれ?",
         choices: [
@@ -457,6 +488,7 @@ class Robot implements Worker {
       },
       {
         id: "so-16",
+        conceptId: "solid-overview",
         question:
           "次のうち、SOLID原則の頭文字と原則名の組み合わせが正しいものはどれ?",
         choices: [
