@@ -5,6 +5,54 @@
 //       言語別実装例(Rust, F#, Kotlin, TypeScript) /
 //       経済情報ドメイン(企業・従業員)での実装例
 // =====================================================
+// 概要ページの目次: カテゴリごとに、どのコンセプトをどの順・
+// どのグループで見せるかを定義する
+const QUIZ_CONCEPT_GROUPS = {
+  "design-patterns": {
+    intro:
+      "GoF(Gang of Four)の23パターンのうち、実務で登場頻度の高い14パターンを収録しています。「生成」「構造」「振る舞い」の3分類ごとに、目的・コード例・使いどころを確認できます。",
+    groups: [
+      {
+        name: "生成に関するパターン",
+        description: "オブジェクトを「どう作るか」を柔軟にするパターン群",
+        concepts: ["singleton", "factory-method", "abstract-factory", "builder"],
+      },
+      {
+        name: "構造に関するパターン",
+        description: "クラスやオブジェクトを「どう組み合わせるか」のパターン群",
+        concepts: ["adapter", "decorator", "facade", "proxy", "composite"],
+      },
+      {
+        name: "振る舞いに関するパターン",
+        description: "オブジェクト間の「責任分担とやり取り」のパターン群",
+        concepts: [
+          "strategy",
+          "template-method",
+          "observer",
+          "command",
+          "chain-of-responsibility",
+        ],
+      },
+    ],
+  },
+  "solid": {
+    intro:
+      "SOLIDは、変更に強く・テストしやすく・理解しやすいオブジェクト指向設計のための5原則です。まず全体像をつかんでから、各原則を順に確認するのがおすすめです。",
+    groups: [
+      {
+        name: "全体像",
+        description: "5原則のつながりと、守ることで得られる効果",
+        concepts: ["solid-overview"],
+      },
+      {
+        name: "5つの原則",
+        description: "S・O・L・I・D それぞれの意味と実践方法",
+        concepts: ["srp", "ocp", "lsp", "isp", "dip"],
+      },
+    ],
+  },
+};
+
 const QUIZ_CONCEPTS = {
   // ===================================================
   // SOLID原則

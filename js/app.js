@@ -10,11 +10,24 @@
   // ---- 画面要素 ----
   const screens = {
     home: document.getElementById("screen-home"),
+    mode: document.getElementById("screen-mode"),
+    learn: document.getElementById("screen-learn"),
     quiz: document.getElementById("screen-quiz"),
     result: document.getElementById("screen-result"),
   };
   const el = {
     categoryList: document.getElementById("category-list"),
+    modeCategoryName: document.getElementById("mode-category-name"),
+    modeQuizMeta: document.getElementById("mode-quiz-meta"),
+    modeLearnMeta: document.getElementById("mode-learn-meta"),
+    btnModeBack: document.getElementById("btn-mode-back"),
+    btnModeQuiz: document.getElementById("btn-mode-quiz"),
+    btnModeLearn: document.getElementById("btn-mode-learn"),
+    learnTitle: document.getElementById("learn-title"),
+    learnIntro: document.getElementById("learn-intro"),
+    learnContent: document.getElementById("learn-content"),
+    btnLearnBack: document.getElementById("btn-learn-back"),
+    btnLearnQuiz: document.getElementById("btn-learn-quiz"),
     progressLabel: document.getElementById("quiz-progress-label"),
     progressFill: document.getElementById("progress-fill"),
     timer: document.getElementById("quiz-timer"),
@@ -39,6 +52,7 @@
   // ---- セッション状態 ----
   let session = null;
   let timerId = null;
+  let currentCategoryId = null;
 
   function shuffle(array) {
     const a = array.slice();
@@ -72,10 +86,68 @@
         <p class="cat-desc">${cat.description}</p>
         <span class="cat-meta">全${count}問・約10分</span>
       `;
-      btn.addEventListener("click", () => startQuiz(cat.id));
+      btn.addEventListener("click", () => renderModeSelect(cat.id));
       el.categoryList.appendChild(btn);
     });
     showScreen("home");
+  }
+
+  // ---------------------------------------------
+  // モード選択画面(クイズ or 概要)
+  // ---------------------------------------------
+  function renderModeSelect(categoryId) {
+    currentCategoryId = categoryId;
+    const cat = QUIZ_DATA.categories.find((c) => c.id === categoryId);
+    const pool = QUIZ_DATA.questions[categoryId] || [];
+    const conceptCount = (QUIZ_CONCEPT_GROUPS[categoryId]?.groups || [])
+      .reduce((sum, g) => sum + g.concepts.length, 0);
+
+    el.modeCategoryName.textContent = `${cat.icon} ${cat.name}`;
+    el.modeQuizMeta.textContent =
+      `全${Math.min(QUESTIONS_PER_SESSION, pool.length)}問・約10分`;
+    el.modeLearnMeta.textContent = `全${conceptCount}項目`;
+    showScreen("mode");
+  }
+
+  // ---------------------------------------------
+  // 概要(学習)画面
+  // ---------------------------------------------
+  function renderLearn(categoryId) {
+    currentCategoryId = categoryId;
+    const cat = QUIZ_DATA.categories.find((c) => c.id === categoryId);
+    const toc = QUIZ_CONCEPT_GROUPS[categoryId];
+
+    el.learnTitle.textContent = `${cat.icon} ${cat.name}の概要`;
+    el.learnIntro.textContent = toc?.intro ?? "";
+    el.learnContent.innerHTML = "";
+
+    (toc?.groups || []).forEach((group) => {
+      const heading = document.createElement("h2");
+      heading.className = "learn-group-title";
+      heading.textContent = group.name;
+      el.learnContent.appendChild(heading);
+
+      if (group.description) {
+        const desc = document.createElement("p");
+        desc.className = "learn-group-desc";
+        desc.textContent = group.description;
+        el.learnContent.appendChild(desc);
+      }
+
+      group.concepts.forEach((conceptId) => {
+        const c = QUIZ_CONCEPTS[conceptId];
+        if (!c) return;
+        const details = document.createElement("details");
+        details.className = "concept-details learn-item";
+        const summary = document.createElement("summary");
+        summary.textContent = c.title;
+        details.appendChild(summary);
+        details.appendChild(buildConceptBody(c));
+        el.learnContent.appendChild(details);
+      });
+    });
+
+    showScreen("learn");
   }
 
   // ---------------------------------------------
@@ -130,17 +202,7 @@
     return sec;
   }
 
-  function buildConceptDetails(conceptId) {
-    const c = QUIZ_CONCEPTS[conceptId];
-    if (!c) return null;
-
-    const details = document.createElement("details");
-    details.className = "concept-details";
-
-    const summary = document.createElement("summary");
-    summary.textContent = `📖 詳しい解説:${c.title}`;
-    details.appendChild(summary);
-
+  function buildConceptBody(c) {
     const body = document.createElement("div");
     body.className = "concept-body";
 
@@ -157,7 +219,20 @@
     domainSec.appendChild(detailCodeBlock(c.domain.code));
     body.appendChild(domainSec);
 
-    details.appendChild(body);
+    return body;
+  }
+
+  function buildConceptDetails(conceptId) {
+    const c = QUIZ_CONCEPTS[conceptId];
+    if (!c) return null;
+
+    const details = document.createElement("details");
+    details.className = "concept-details";
+
+    const summary = document.createElement("summary");
+    summary.textContent = `📖 詳しい解説:${c.title}`;
+    details.appendChild(summary);
+    details.appendChild(buildConceptBody(c));
     return details;
   }
 
@@ -165,6 +240,7 @@
   // クイズ進行
   // ---------------------------------------------
   function startQuiz(categoryId) {
+    currentCategoryId = categoryId;
     const pool = QUIZ_DATA.questions[categoryId] || [];
     const picked = shuffle(pool).slice(0, QUESTIONS_PER_SESSION);
 
@@ -327,16 +403,21 @@
   }
 
   function quit() {
-    if (session.answers.length === 0 || confirm("途中でやめてカテゴリ選択に戻りますか?")) {
+    if (session.answers.length === 0 || confirm("クイズを途中でやめますか?")) {
       stopTimer();
       session = null;
-      renderHome();
+      renderModeSelect(currentCategoryId);
     }
   }
 
   // ---------------------------------------------
   // イベント登録・初期化
   // ---------------------------------------------
+  el.btnModeBack.addEventListener("click", renderHome);
+  el.btnModeQuiz.addEventListener("click", () => startQuiz(currentCategoryId));
+  el.btnModeLearn.addEventListener("click", () => renderLearn(currentCategoryId));
+  el.btnLearnBack.addEventListener("click", () => renderModeSelect(currentCategoryId));
+  el.btnLearnQuiz.addEventListener("click", () => startQuiz(currentCategoryId));
   el.btnNext.addEventListener("click", next);
   el.btnQuit.addEventListener("click", quit);
   el.btnRetry.addEventListener("click", () => startQuiz(session.categoryId));

@@ -21,6 +21,38 @@
       <div id="category-list" class="category-list"></div>
     </section>
 
+    <!-- モード選択画面(クイズ or 概要) -->
+    <section id="screen-mode" class="screen hidden">
+      <div class="quiz-header">
+        <button id="btn-mode-back" class="btn-text" type="button">← カテゴリ選択に戻る</button>
+      </div>
+      <h2 id="mode-category-name" class="mode-category-name"></h2>
+      <div class="category-list">
+        <button id="btn-mode-quiz" class="category-card" type="button">
+          <span class="cat-icon">📝</span><span class="cat-name">クイズに挑戦</span>
+          <p class="cat-desc">ランダムに10問出題。回答するとその場で解説が読めます。</p>
+          <span class="cat-meta" id="mode-quiz-meta">全10問・約10分</span>
+        </button>
+        <button id="btn-mode-learn" class="category-card" type="button">
+          <span class="cat-icon">📚</span><span class="cat-name">概要を学ぶ</span>
+          <p class="cat-desc">このカテゴリの考え方を、コード例つきの解説でひとつずつ確認できます。</p>
+          <span class="cat-meta" id="mode-learn-meta"></span>
+        </button>
+      </div>
+    </section>
+
+    <!-- 概要(学習)画面 -->
+    <section id="screen-learn" class="screen hidden">
+      <div class="quiz-header">
+        <button id="btn-learn-back" class="btn-text" type="button">← 戻る</button>
+        <span id="learn-title" class="progress-label"></span>
+        <span></span>
+      </div>
+      <p id="learn-intro" class="learn-intro"></p>
+      <div id="learn-content"></div>
+      <button id="btn-learn-quiz" class="btn btn-primary learn-quiz-btn" type="button">このカテゴリのクイズに挑戦</button>
+    </section>
+
     <!-- クイズ画面 -->
     <section id="screen-quiz" class="screen hidden">
       <div class="quiz-header">

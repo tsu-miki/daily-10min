@@ -154,6 +154,50 @@ main {
   }
 }
 
+/* ---------- モード選択画面 ---------- */
+.mode-category-name {
+  font-size: 1.25rem;
+  text-align: center;
+  margin: 6px 0 18px;
+}
+
+/* ---------- 概要(学習)画面 ---------- */
+.learn-intro {
+  font-size: 0.88rem;
+  color: var(--color-text-sub);
+  margin-bottom: 20px;
+}
+
+.learn-group-title {
+  font-size: 1.05rem;
+  margin: 24px 0 4px;
+}
+
+.learn-group-title:first-child {
+  margin-top: 0;
+}
+
+.learn-group-desc {
+  font-size: 0.82rem;
+  color: var(--color-text-sub);
+  margin-bottom: 10px;
+}
+
+.learn-item {
+  background: var(--color-surface);
+  box-shadow: var(--shadow);
+  margin: 0 0 10px;
+}
+
+.learn-item summary {
+  font-size: 0.95rem;
+  color: var(--color-text);
+}
+
+.learn-quiz-btn {
+  margin-top: 24px;
+}
+
 /* ---------- クイズ画面 ---------- */
 .quiz-header {
   display: flex;
