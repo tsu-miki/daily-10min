@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="1回10分でサクッと解ける学習クイズ。デザインパターン・SOLID原則などのジャンルから選んで挑戦!">
+  <meta name="theme-color" content="#4f46e5">
+  <title>Daily 10min Quiz</title>
+  <link rel="stylesheet" href="css/style.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⏱️</text></svg>">
+</head>
+<body>
+  <header class="app-header">
+    <h1 class="app-title" id="app-title">⏱️ Daily 10min Quiz</h1>
+  </header>
+
+  <main id="app">
+    <!-- カテゴリ選択画面 -->
+    <section id="screen-home" class="screen">
+      <p class="lead">1回10分。ジャンルを選んでスタート!</p>
+      <div id="category-list" class="category-list"></div>
+    </section>
+
+    <!-- クイズ画面 -->
+    <section id="screen-quiz" class="screen hidden">
+      <div class="quiz-header">
+        <button id="btn-quit" class="btn-text" type="button">← やめる</button>
+        <span id="quiz-progress-label" class="progress-label"></span>
+        <span id="quiz-timer" class="timer">0:00</span>
+      </div>
+      <div class="progress-bar"><div id="progress-fill" class="progress-fill"></div></div>
+
+      <div class="question-card">
+        <p id="question-text" class="question-text"></p>
+        <pre id="question-code" class="question-code hidden"><code></code></pre>
+      </div>
+
+      <div id="choices" class="choices"></div>
+
+      <div id="feedback" class="feedback hidden">
+        <p id="feedback-result" class="feedback-result"></p>
+        <p id="feedback-explanation" class="feedback-explanation"></p>
+        <button id="btn-next" class="btn btn-primary" type="button">次の問題へ</button>
+      </div>
+    </section>
+
+    <!-- 結果画面 -->
+    <section id="screen-result" class="screen hidden">
+      <div class="result-card">
+        <p class="result-emoji" id="result-emoji"></p>
+        <p class="result-score"><span id="result-score"></span></p>
+        <p class="result-detail" id="result-detail"></p>
+      </div>
+      <h2 class="review-title">ふりかえり</h2>
+      <div id="review-list" class="review-list"></div>
+      <div class="result-actions">
+        <button id="btn-retry" class="btn btn-primary" type="button">もう一度挑戦</button>
+        <button id="btn-home" class="btn btn-secondary" type="button">カテゴリ選択に戻る</button>
+      </div>
+    </section>
+  </main>
+
+  <footer class="app-footer">
+    <p>毎日10分、コツコツ学習 💪</p>
+  </footer>
+
+  <script src="data/questions.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
