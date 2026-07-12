@@ -499,7 +499,7 @@ class Robot implements Worker {
         ],
         answerIndex: 0,
         explanation:
-          "SOLIDは S=単一責任(SRP)、O=オープン・クローズド(OCP)、L=リスコフの置換(LSP)、I=インターフェース分離(ISP)、D=依存性逆転(DIP)の5原則です。",
+          "SOLIDは S=単一責任(SRP: Single Responsibility Principle)、O=オープン・クローズド(OCP: Open-Closed Principle)、L=リスコフの置換(LSP: Liskov Substitution Principle)、I=インターフェース分離(ISP: Interface Segregation Principle)、D=依存性逆転(DIP: Dependency Inversion Principle)の5原則です。",
       },
     ],
   },
