@@ -8,6 +8,27 @@
 // 概要ページの目次: カテゴリごとに、どのコンセプトをどの順・
 // どのグループで見せるかを定義する
 const QUIZ_CONCEPT_GROUPS = {
+  "oop": {
+    intro:
+      "オブジェクト指向プログラミング(OOP)の基礎を収録しています。まず全体像をつかみ、「4つの柱」と呼ばれる基本概念、そして実務で重要な設計指針の順で確認できます。SOLID原則やデザインパターンの土台になる内容です。",
+    groups: [
+      {
+        name: "全体像",
+        description: "オブジェクト指向とは何か、クラスとインスタンスの関係",
+        concepts: ["oop-overview"],
+      },
+      {
+        name: "4つの柱",
+        description: "OOPを支える基本概念",
+        concepts: ["encapsulation", "abstraction", "inheritance", "polymorphism"],
+      },
+      {
+        name: "設計の指針",
+        description: "継承と合成の使い分け",
+        concepts: ["composition-over-inheritance"],
+      },
+    ],
+  },
   "design-patterns": {
     intro:
       "GoF(Gang of Four)の23パターンのうち、実務で登場頻度の高い14パターンを収録しています。「生成」「構造」「振る舞い」の3分類ごとに、目的・コード例・使いどころを確認できます。",
@@ -54,6 +75,880 @@ const QUIZ_CONCEPT_GROUPS = {
 };
 
 const QUIZ_CONCEPTS = {
+  // ===================================================
+  // オブジェクト指向
+  // ===================================================
+  "oop-overview": {
+    title: "オブジェクト指向(全体像)",
+    what: "オブジェクト指向プログラミング(OOP: Object-Oriented Programming)は、状態(データ)と振る舞い(メソッド)を「オブジェクト」としてひとまとめにし、オブジェクト同士の協調としてプログラムを組み立てる考え方です。クラスは設計図、インスタンスはそこから作られた実体です。OOPを支える「4つの柱」は、カプセル化・抽象化・継承・ポリモーフィズムです。",
+    apply: {
+      text: "データと関数がバラバラな手続き的コードを、データと振る舞いをまとめたクラスに整理します。",
+      code: `// ❌ Before: データと関数がバラバラで、どこからでも書き換えられる
+let employeeName = "佐藤";
+let employeeSalary = 5000000;
+function raiseSalary(amount) { employeeSalary += amount; }
+
+// ✅ After: 状態と振る舞いをオブジェクトにまとめる
+class Employee {
+  constructor(
+    private name: string,
+    private salary: number,
+  ) {}
+
+  raise(amount: number) {
+    if (amount <= 0) throw new Error("昇給額が不正");
+    this.salary += amount;
+  }
+  profile(): string {
+    return this.name + "(年収" + this.salary + "円)";
+  }
+}
+
+// クラス(設計図)から独立した状態を持つインスタンス(実体)を作る
+const sato = new Employee("佐藤", 5_000_000);
+const suzuki = new Employee("鈴木", 6_000_000);
+sato.raise(300_000); // 佐藤だけが昇給する`,
+    },
+    benefits: "・現実の概念(企業、従業員、注文…)をそのままコードにモデリングできる\n・データとそれを扱うロジックが同じ場所にあり、影響範囲を追いやすい\n・カプセル化・抽象化・継承・ポリモーフィズムを組み合わせて、変更に強い設計ができる\n・クラス単位で分業・再利用・テストがしやすい",
+    langExamples: [
+      {
+        lang: "Rust",
+        code: `// Rustはstruct(データ)+impl(振る舞い)で表現する
+struct Employee {
+    name: String,
+    salary: u64,
+}
+
+impl Employee {
+    fn new(name: &str, salary: u64) -> Self {
+        Self { name: name.into(), salary }
+    }
+
+    fn raise(&mut self, amount: u64) {
+        self.salary += amount;
+    }
+
+    fn profile(&self) -> String {
+        format!("{}(年収{}円)", self.name, self.salary)
+    }
+}
+
+let mut sato = Employee::new("佐藤", 5_000_000);
+sato.raise(300_000);`,
+      },
+      {
+        lang: "F#",
+        code: `// F#ではクラスも、レコード+関数のスタイルも選べる
+type Employee(name: string, salary: int64) =
+    let mutable salary = salary
+
+    member _.Raise amount =
+        salary <- salary + amount
+
+    member _.Profile =
+        $"{name}(年収{salary}円)"
+
+let sato = Employee("佐藤", 5_000_000L)
+sato.Raise 300_000L
+printfn $"{sato.Profile}"`,
+      },
+      {
+        lang: "Kotlin",
+        code: `class Employee(
+    private val name: String,
+    private var salary: Long,
+) {
+    fun raise(amount: Long) {
+        require(amount > 0) { "昇給額が不正" }
+        salary += amount
+    }
+
+    fun profile() = "$name(年収${"$"}{salary}円)"
+}
+
+val sato = Employee("佐藤", 5_000_000)
+sato.raise(300_000)  // 佐藤のインスタンスだけが変わる`,
+      },
+      {
+        lang: "TypeScript",
+        code: `class Employee {
+  constructor(
+    private name: string,
+    private salary: number,
+  ) {}
+
+  raise(amount: number) {
+    if (amount <= 0) throw new Error("昇給額が不正");
+    this.salary += amount;
+  }
+
+  profile(): string {
+    return this.name + "(年収" + this.salary + "円)";
+  }
+}
+
+const sato = new Employee("佐藤", 5_000_000);
+sato.raise(300_000);`,
+      },
+    ],
+    domain: {
+      text: "経済情報ドメインを「企業」「従業員」というオブジェクトの協調でモデリングした例です。それぞれが自分の状態と振る舞いを持ち、メソッド呼び出しで協力し合います。",
+      code: `class Employee {
+  constructor(public name: string, private salary: number) {}
+  annualCost(): number { return this.salary * 1.15; } // 社会保険料込み
+}
+
+class Company {
+  private employees: Employee[] = [];
+  constructor(public name: string, private revenue: number) {}
+
+  hire(e: Employee) { this.employees.push(e); }
+
+  // 企業が自分の従業員たちと協調して人件費率を計算する
+  laborCostRatio(): number {
+    const total = this.employees.reduce(
+      (sum, e) => sum + e.annualCost(), 0);
+    return total / this.revenue;
+  }
+}
+
+const acme = new Company("アクメ商事", 1_000_000_000);
+acme.hire(new Employee("佐藤", 5_000_000));
+acme.hire(new Employee("鈴木", 6_000_000));
+acme.laborCostRatio(); // 企業・従業員それぞれの知識が適切な場所にある`,
+    },
+  },
+
+  "encapsulation": {
+    title: "カプセル化",
+    what: "カプセル化(Encapsulation)は、データ(状態)とそれを操作するメソッドをひとまとめにし、内部の詳細を外部から隠すことです。外部には公開インターフェース(publicなメソッド)だけを見せ、内部表現(privateなフィールド)には直接触れさせません。これにより「残高がマイナスにならない」といった不変条件をクラス自身が守れます。",
+    apply: {
+      text: "誰でも書き換えられる公開フィールドを、検証つきメソッド経由でのみ操作できる形に変えます。",
+      code: `// ❌ Before: 外部から残高を直接いじれるので、不正な状態を防げない
+class BankAccount {
+  balance = 0;
+}
+const acc = new BankAccount();
+acc.balance = -99999; // 誰でも壊せる
+
+// ✅ After: 内部を隠し、検証つきの操作だけを公開する
+class BankAccount {
+  #balance = 0;               // 外部から直接触れない
+
+  deposit(amount: number) {
+    if (amount <= 0) throw new Error("不正な金額");
+    this.#balance += amount;
+  }
+  withdraw(amount: number) {
+    if (amount > this.#balance) throw new Error("残高不足");
+    this.#balance -= amount;
+  }
+  get balance() { return this.#balance; } // 読み取りだけ公開
+}`,
+    },
+    benefits: "・不変条件(残高≧0など)をクラス自身が保証でき、壊れた状態が存在できなくなる\n・内部実装(データ構造や計算方法)を、利用側に影響を与えずに変更できる\n・「触ってよい範囲」が型で明示され、誤用やバグの混入経路が減る\n・変更の影響範囲がクラス内部に閉じ、デバッグ・レビューが楽になる",
+    langExamples: [
+      {
+        lang: "Rust",
+        code: `// Rustはフィールドがデフォルトで非公開(モジュール外から不可視)
+pub struct BankAccount {
+    balance: u64, // pubを付けない限り外部から触れない
+}
+
+impl BankAccount {
+    pub fn new() -> Self {
+        Self { balance: 0 }
+    }
+
+    pub fn deposit(&mut self, amount: u64) {
+        assert!(amount > 0, "不正な金額");
+        self.balance += amount;
+    }
+
+    pub fn balance(&self) -> u64 {
+        self.balance
+    }
+}`,
+      },
+      {
+        lang: "F#",
+        code: `type BankAccount() =
+    // letで束縛した値はクラスの外から見えない
+    let mutable balance = 0L
+
+    member _.Deposit amount =
+        if amount <= 0L then invalidArg "amount" "不正な金額"
+        balance <- balance + amount
+
+    member _.Balance = balance  // 読み取りだけ公開
+
+let acc = BankAccount()
+acc.Deposit 1000L
+// acc.balance <- -1L はコンパイルエラー(触れない)`,
+      },
+      {
+        lang: "Kotlin",
+        code: `class BankAccount {
+    // privateなプロパティは外部から触れない
+    private var _balance: Long = 0
+
+    fun deposit(amount: Long) {
+        require(amount > 0) { "不正な金額" }
+        _balance += amount
+    }
+
+    // 読み取り専用プロパティとして公開
+    val balance: Long
+        get() = _balance
+}
+
+val acc = BankAccount()
+acc.deposit(1000)
+// acc.balance = -1 はコンパイルエラー`,
+      },
+      {
+        lang: "TypeScript",
+        code: `class BankAccount {
+  #balance = 0;   // ECMAScriptのプライベートフィールド
+
+  deposit(amount: number) {
+    if (amount <= 0) throw new Error("不正な金額");
+    this.#balance += amount;
+  }
+
+  get balance() { return this.#balance; }
+}
+
+const acc = new BankAccount();
+acc.deposit(1000);
+// acc.#balance = -1 は構文エラー(外部から触れない)`,
+      },
+    ],
+    domain: {
+      text: "従業員の給与を公開フィールドにすると、昇給ルール(上限や承認)を無視した書き換えができてしまいます。給与を隠し、ルールを内蔵した操作だけを公開します。",
+      code: `class Employee {
+  #salary: number;              // 給与は外部から直接触れない
+
+  constructor(public name: string, initialSalary: number) {
+    this.#salary = initialSalary;
+  }
+
+  // 昇給ルール(1回20%まで)をクラス自身が守る
+  raise(rate: number) {
+    if (rate <= 0 || rate > 0.2) {
+      throw new Error("昇給率は0〜20%の範囲で指定してください");
+    }
+    this.#salary = Math.round(this.#salary * (1 + rate));
+  }
+
+  // 給与そのものは見せず、必要な情報だけ公開する
+  payrollCost(): number { return this.#salary * 1.15; }
+}
+
+class Company {
+  private employees: Employee[] = [];
+  hire(e: Employee) { this.employees.push(e); }
+  totalPayroll(): number {
+    return this.employees.reduce((s, e) => s + e.payrollCost(), 0);
+  }
+}
+// e.salary = 99999999 のような不正な書き換えは型レベルで不可能`,
+    },
+  },
+
+  "abstraction": {
+    title: "抽象化",
+    what: "抽象化(Abstraction)は、対象の本質的な特徴(何ができるか)だけを取り出し、それ以外の詳細(どうやるか)を隠して扱えるようにすることです。道具としてはインターフェースや抽象クラスを使います。利用側は「契約」だけを知ってプログラミングできるため、実装の差し替えや追加が自由になります。SOLIDのDIP・OCPの土台となる考え方です。",
+    apply: {
+      text: "「通知できる」という本質だけをインターフェースに取り出し、メール・Slackなどの詳細を利用側から隠します。",
+      code: `// 本質(何ができるか)だけを契約として定義する
+interface Notifier {
+  notify(message: string): void;
+}
+
+// 詳細(どうやるか)は実装クラスに隠れる
+class EmailNotifier implements Notifier {
+  notify(message: string) { /* SMTP接続、認証、送信… */ }
+}
+class SlackNotifier implements Notifier {
+  notify(message: string) { /* Webhook呼び出し… */ }
+}
+
+// 利用側は「通知できる」ことしか知らない
+function alertAll(notifiers: Notifier[], message: string) {
+  notifiers.forEach(n => n.notify(message));
+}`,
+    },
+    benefits: "・利用側が詳細を知らずに済み、考えることが減る(複雑さの管理)\n・実装の差し替え・追加が利用側の修正なしでできる(OCP・DIPの土台)\n・テスト時は本物の代わりにモック実装を渡せる\n・「何ができるか」が型で表現され、設計の意図が伝わる",
+    langExamples: [
+      {
+        lang: "Rust",
+        code: `// トレイトが「何ができるか」の契約を表す
+trait Notifier {
+    fn notify(&self, message: &str);
+}
+
+struct EmailNotifier;
+impl Notifier for EmailNotifier {
+    fn notify(&self, message: &str) {
+        /* SMTP接続、認証、送信… */
+    }
+}
+
+struct SlackNotifier;
+impl Notifier for SlackNotifier {
+    fn notify(&self, message: &str) {
+        /* Webhook呼び出し… */
+    }
+}
+
+fn alert_all(notifiers: &[Box<dyn Notifier>], message: &str) {
+    for n in notifiers {
+        n.notify(message);
+    }
+}`,
+      },
+      {
+        lang: "F#",
+        code: `type INotifier =
+    abstract Notify: message: string -> unit
+
+type EmailNotifier() =
+    interface INotifier with
+        member _.Notify message = () // SMTP接続、認証、送信…
+
+type SlackNotifier() =
+    interface INotifier with
+        member _.Notify message = () // Webhook呼び出し…
+
+let alertAll (notifiers: INotifier list) message =
+    notifiers |> List.iter (fun n -> n.Notify message)
+
+// さらに関数型では「string -> unit という関数型」自体が
+// 最小の抽象化として機能する`,
+      },
+      {
+        lang: "Kotlin",
+        code: `interface Notifier {
+    fun notify(message: String)
+}
+
+class EmailNotifier : Notifier {
+    override fun notify(message: String) {
+        /* SMTP接続、認証、送信… */
+    }
+}
+
+class SlackNotifier : Notifier {
+    override fun notify(message: String) {
+        /* Webhook呼び出し… */
+    }
+}
+
+fun alertAll(notifiers: List<Notifier>, message: String) {
+    notifiers.forEach { it.notify(message) }
+}`,
+      },
+      {
+        lang: "TypeScript",
+        code: `interface Notifier {
+  notify(message: string): void;
+}
+
+class EmailNotifier implements Notifier {
+  notify(message: string) { /* SMTP接続、認証、送信… */ }
+}
+
+class SlackNotifier implements Notifier {
+  notify(message: string) { /* Webhook呼び出し… */ }
+}
+
+function alertAll(notifiers: Notifier[], message: string) {
+  notifiers.forEach(n => n.notify(message));
+}`,
+      },
+    ],
+    domain: {
+      text: "「企業の株価を取得できる」という本質だけを抽象化すれば、裏側がリアルタイムAPIでも、日次CSVでも、テスト用の固定値でも、画面側のコードは1行も変わりません。",
+      code: `// 本質: 「企業コードを渡すと株価が返る」という契約
+interface StockPriceProvider {
+  getPrice(company: Company): number;
+}
+
+// 詳細はそれぞれの実装に隠れる
+class RealtimeApiProvider implements StockPriceProvider {
+  getPrice(company: Company) { /* 取引所APIへ接続… */ return 0; }
+}
+class DailyCsvProvider implements StockPriceProvider {
+  getPrice(company: Company) { /* 日次CSVから読む… */ return 0; }
+}
+class FixtureProvider implements StockPriceProvider {
+  getPrice(company: Company) { return 1000; } // テスト用固定値
+}
+
+// 従業員(アナリスト)向けのウォッチ画面は契約だけに依存する
+class WatchListScreen {
+  constructor(
+    private provider: StockPriceProvider,
+    private analyst: Employee,
+  ) {}
+  render(companies: Company[]) {
+    companies.forEach(c =>
+      console.log(c.name + ": " + this.provider.getPrice(c)));
+  }
+}`,
+    },
+  },
+
+  "inheritance": {
+    title: "継承",
+    what: "継承(Inheritance)は、既存クラス(親・スーパークラス)の状態や振る舞いを引き継いだ新しいクラス(子・サブクラス)を定義し、差分だけを追加・変更(オーバーライド)する仕組みです。「〜は〜の一種(is-a)」という関係を表します。強力ですが親子の結合が強いため、振る舞いの契約を守れる真のis-a関係(リスコフの置換原則)に限定して使うのが目安です。",
+    apply: {
+      text: "従業員クラスの共通部分を引き継ぎ、マネージャー固有の差分だけをサブクラスに書きます。",
+      code: `class Employee {
+  constructor(public name: string, protected salary: number) {}
+
+  monthlyPay(): number { return this.salary / 12; }
+  profile(): string { return this.name + "(" + this.role() + ")"; }
+  role(): string { return "一般社員"; }
+}
+
+// Employeeの性質を引き継ぎ、差分だけを定義する
+class Manager extends Employee {
+  constructor(name: string, salary: number, private teamSize: number) {
+    super(name, salary);
+  }
+
+  // オーバーライド: 役職名を上書き
+  role(): string { return "マネージャー"; }
+
+  // 追加: マネージャー固有の振る舞い
+  monthlyPay(): number {
+    return super.monthlyPay() + this.teamSize * 10_000; // 管理手当
+  }
+}`,
+    },
+    benefits: "・共通のコードを1箇所(親クラス)にまとめ、重複を排除できる\n・差分プログラミング: 変わる部分だけを書けばよい\n・親クラス型として一括で扱え、ポリモーフィズムの土台になる\n・注意: 親の変更が全サブクラスに波及する強い結合なので、is-a関係が成立しない再利用には合成を使う",
+    langExamples: [
+      {
+        lang: "Rust",
+        code: `// Rustには実装継承がない。共通の振る舞いは
+// トレイトのデフォルト実装で共有する
+trait Employee {
+    fn name(&self) -> &str;
+    fn salary(&self) -> u64;
+
+    // デフォルト実装(共通部分)
+    fn monthly_pay(&self) -> u64 {
+        self.salary() / 12
+    }
+    fn role(&self) -> &str {
+        "一般社員"
+    }
+}
+
+struct Manager {
+    name: String,
+    salary: u64,
+    team_size: u64,
+}
+impl Employee for Manager {
+    fn name(&self) -> &str { &self.name }
+    fn salary(&self) -> u64 { self.salary }
+    // 差分だけをオーバーライド
+    fn role(&self) -> &str { "マネージャー" }
+    fn monthly_pay(&self) -> u64 {
+        self.salary / 12 + self.team_size * 10_000
+    }
+}`,
+      },
+      {
+        lang: "F#",
+        code: `type Employee(name: string, salary: int64) =
+    member _.Name = name
+    member _.Salary = salary
+    abstract MonthlyPay: int64
+    default _.MonthlyPay = salary / 12L
+    abstract Role: string
+    default _.Role = "一般社員"
+
+// inheritで親クラスの性質を引き継ぐ
+type Manager(name, salary, teamSize: int64) =
+    inherit Employee(name, salary)
+
+    override _.Role = "マネージャー"
+    override this.MonthlyPay =
+        base.MonthlyPay + teamSize * 10_000L`,
+      },
+      {
+        lang: "Kotlin",
+        code: `// Kotlinのクラスはデフォルトでfinal。
+// 継承させるには明示的にopenを付ける
+open class Employee(val name: String, protected val salary: Long) {
+    open fun monthlyPay(): Long = salary / 12
+    open fun role(): String = "一般社員"
+}
+
+class Manager(
+    name: String,
+    salary: Long,
+    private val teamSize: Int,
+) : Employee(name, salary) {
+    override fun role() = "マネージャー"
+    override fun monthlyPay() =
+        super.monthlyPay() + teamSize * 10_000L
+}`,
+      },
+      {
+        lang: "TypeScript",
+        code: `class Employee {
+  constructor(public name: string, protected salary: number) {}
+  monthlyPay(): number { return this.salary / 12; }
+  role(): string { return "一般社員"; }
+}
+
+class Manager extends Employee {
+  constructor(name: string, salary: number, private teamSize: number) {
+    super(name, salary);
+  }
+  role(): string { return "マネージャー"; }
+  monthlyPay(): number {
+    return super.monthlyPay() + this.teamSize * 10_000;
+  }
+}`,
+      },
+    ],
+    domain: {
+      text: "「上場企業は企業の一種」という真のis-a関係を継承で表した例です。共通の振る舞いはCompanyに置き、上場企業固有の情報だけをListedCompanyが追加します(is-aが崩れる場合の注意はLSPの解説も参照)。",
+      code: `class Company {
+  constructor(
+    public name: string,
+    public industry: string,
+    protected employees: Employee[],
+  ) {}
+
+  headcount(): number { return this.employees.length; }
+  summary(): string {
+    return this.name + "(" + this.industry + "・"
+      + this.headcount() + "名)";
+  }
+}
+
+// 上場企業 is-a 企業: 共通部分を引き継ぎ、差分を追加
+class ListedCompany extends Company {
+  constructor(
+    name: string,
+    industry: string,
+    employees: Employee[],
+    public tickerCode: string,   // 証券コード(上場企業固有)
+  ) {
+    super(name, industry, employees);
+  }
+
+  // オーバーライド: 証券コードつきの表示に上書き
+  summary(): string {
+    return "[" + this.tickerCode + "] " + super.summary();
+  }
+}
+
+const acme = new ListedCompany("アクメ商事", "卸売", staff, "8001");
+acme.summary(); // "[8001] アクメ商事(卸売・120名)"`,
+    },
+  },
+
+  "polymorphism": {
+    title: "ポリモーフィズム",
+    what: "ポリモーフィズム(Polymorphism=多態性)は、同じメソッド呼び出しが、実際のオブジェクトの型に応じて異なる振る舞いをすることです。呼び出し側は相手の具体的な型を知る必要がなく、型による分岐(if/switch)をオブジェクトの差し替えに置き換えられます。代表はサブタイプ多相(オーバーライド+動的ディスパッチ)で、他にジェネリクス(パラメトリック多相)やオーバーロードもあります。",
+    apply: {
+      text: "型で分岐するコードを、共通インターフェース+それぞれの実装に置き換えます。呼び出し側は1つの書き方で済みます。",
+      code: `// ❌ Before: 型を調べて分岐する(型が増えるたびに修正)
+function monthlyPay(worker) {
+  if (worker.type === "fulltime") return worker.salary / 12;
+  if (worker.type === "contract") return worker.hourlyRate * 160;
+  if (worker.type === "executive") return worker.annualComp / 12;
+}
+
+// ✅ After: 同じ呼び出しで、型に応じた実装が動く
+interface Worker {
+  monthlyPay(): number;
+}
+class FullTimeEmployee implements Worker {
+  monthlyPay() { return this.salary / 12; }
+}
+class ContractWorker implements Worker {
+  monthlyPay() { return this.hourlyRate * 160; }
+}
+
+// 呼び出し側は相手が誰でも同じ1行
+function printPayroll(workers: Worker[]) {
+  workers.forEach(w => console.log(w.monthlyPay()));
+}`,
+    },
+    benefits: "・型による分岐(if/switch)が消え、コードが単純になる\n・新しい型の追加が「クラスの追加」だけで済む(OCP)\n・呼び出し側が具体的な型を知らないため、疎結合になる\n・StrategyやTemplate Methodなど多くのデザインパターンの動力源になる",
+    langExamples: [
+      {
+        lang: "Rust",
+        code: `trait Worker {
+    fn monthly_pay(&self) -> u64;
+}
+
+struct FullTime { salary: u64 }
+impl Worker for FullTime {
+    fn monthly_pay(&self) -> u64 { self.salary / 12 }
+}
+
+struct Contract { hourly_rate: u64 }
+impl Worker for Contract {
+    fn monthly_pay(&self) -> u64 { self.hourly_rate * 160 }
+}
+
+// dyn Traitによる動的ディスパッチ
+fn print_payroll(workers: &[Box<dyn Worker>]) {
+    for w in workers {
+        println!("{}", w.monthly_pay());
+    }
+}`,
+      },
+      {
+        lang: "F#",
+        code: `type IWorker =
+    abstract MonthlyPay: int64
+
+type FullTime(salary: int64) =
+    interface IWorker with
+        member _.MonthlyPay = salary / 12L
+
+type Contract(hourlyRate: int64) =
+    interface IWorker with
+        member _.MonthlyPay = hourlyRate * 160L
+
+let printPayroll (workers: IWorker list) =
+    workers |> List.iter (fun w -> printfn $"{w.MonthlyPay}")
+
+printPayroll [ FullTime 6_000_000L; Contract 3_000L ]
+// 同じ呼び出しで、型ごとに違う計算が動く`,
+      },
+      {
+        lang: "Kotlin",
+        code: `interface Worker {
+    fun monthlyPay(): Long
+}
+
+class FullTime(private val salary: Long) : Worker {
+    override fun monthlyPay() = salary / 12
+}
+
+class Contract(private val hourlyRate: Long) : Worker {
+    override fun monthlyPay() = hourlyRate * 160
+}
+
+fun printPayroll(workers: List<Worker>) {
+    workers.forEach { println(it.monthlyPay()) }
+}
+
+printPayroll(listOf(FullTime(6_000_000), Contract(3_000)))`,
+      },
+      {
+        lang: "TypeScript",
+        code: `interface Worker {
+  monthlyPay(): number;
+}
+
+class FullTime implements Worker {
+  constructor(private salary: number) {}
+  monthlyPay() { return this.salary / 12; }
+}
+
+class Contract implements Worker {
+  constructor(private hourlyRate: number) {}
+  monthlyPay() { return this.hourlyRate * 160; }
+}
+
+function printPayroll(workers: Worker[]) {
+  workers.forEach(w => console.log(w.monthlyPay()));
+}
+
+printPayroll([new FullTime(6_000_000), new Contract(3_000)]);`,
+      },
+    ],
+    domain: {
+      text: "企業への出資形態(株式・債券・融資)は、評価額の計算方法がまったく違います。共通のInvestmentインターフェースにすれば、ポートフォリオ集計は出資形態を知らずに合計できます。",
+      code: `interface Investment {
+  currentValue(): number;   // 同じ問いかけ、違う計算
+}
+
+class StockHolding implements Investment {
+  constructor(private company: Company, private shares: number) {}
+  currentValue() { return this.company.stockPrice * this.shares; }
+}
+class Bond implements Investment {
+  constructor(private faceValue: number, private marketRate: number) {}
+  currentValue() { return this.faceValue / (1 + this.marketRate); }
+}
+class Loan implements Investment {
+  constructor(private principal: number, private repaid: number) {}
+  currentValue() { return this.principal - this.repaid; }
+}
+
+// ポートフォリオ担当の従業員は、出資形態ごとの計算式を知らなくてよい
+class Portfolio {
+  constructor(private manager: Employee, private assets: Investment[]) {}
+  totalValue(): number {
+    return this.assets.reduce((sum, a) => sum + a.currentValue(), 0);
+  }
+}
+// 新しい出資形態(転換社債など)もクラス追加だけで集計に加わる`,
+    },
+  },
+
+  "composition-over-inheritance": {
+    title: "継承より合成",
+    what: "「継承より合成(Composition over Inheritance)」は、機能の再利用を安易な継承ではなく、他のオブジェクトをフィールドとして持ち、処理を委譲する「合成」で実現しようという設計指針です。判断の目安は関係性です。「AはBの一種(is-a)」で振る舞いの契約も守れるなら継承、「AはBを持つ/使う(has-a)」なら合成。継承は親子の結合が強く、階層は後から組み替えにくいため、迷ったら合成が安全です。",
+    apply: {
+      text: "「機能が欲しいだけ」の継承をやめ、必要な部品を持って委譲する形に変えます。",
+      code: `// ❌ Before: ログ機能が欲しいだけなのに継承してしまう
+// (ReportServiceはLoggerの一種、ではない)
+class ReportService extends Logger {
+  generate() {
+    this.log("生成開始"); // 継承で手に入れたメソッド
+    /* … */
+  }
+}
+
+// ✅ After: Loggerを「持って」委譲する(has-a)
+class ReportService {
+  constructor(private logger: Logger) {}  // 合成
+
+  generate() {
+    this.logger.log("生成開始");  // 委譲
+    /* … */
+  }
+}
+// テスト時はダミーのLoggerに差し替えられ、
+// ログの実装を変えてもReportServiceの階層は影響を受けない`,
+    },
+    benefits: "・部品の組み合わせを実行時に自由に変えられる(継承階層はコンパイル時に固定)\n・複数の機能を組み合わせても、多重継承の複雑さが生じない\n・親クラスの内部実装への依存(脆い基底クラス問題)を避けられる\n・StrategyやDecoratorなど、合成を活かしたパターンにつながる",
+    langExamples: [
+      {
+        lang: "Rust",
+        code: `// Rustは実装継承がなく、合成が基本スタイル
+struct Logger;
+impl Logger {
+    fn log(&self, msg: &str) {
+        println!("[LOG] {msg}");
+    }
+}
+
+struct ReportService {
+    logger: Logger, // has-a: 部品として持つ
+}
+
+impl ReportService {
+    fn generate(&self) {
+        self.logger.log("生成開始"); // 委譲
+        /* … */
+    }
+}`,
+      },
+      {
+        lang: "F#",
+        code: `type Logger() =
+    member _.Log msg = printfn $"[LOG] {msg}"
+
+// 部品を受け取って保持する(has-a)
+type ReportService(logger: Logger) =
+    member _.Generate() =
+        logger.Log "生成開始"  // 委譲
+        // …
+
+// 関数型スタイルなら「関数を部品として持つ」だけでよい
+let makeGenerate (log: string -> unit) =
+    fun () ->
+        log "生成開始"
+        // …`,
+      },
+      {
+        lang: "Kotlin",
+        code: `interface Logger {
+    fun log(msg: String)
+}
+
+class ConsoleLogger : Logger {
+    override fun log(msg: String) = println("[LOG] $msg")
+}
+
+// 合成: Loggerを持って委譲する
+class ReportService(private val logger: Logger) {
+    fun generate() {
+        logger.log("生成開始")
+        /* … */
+    }
+}
+
+// Kotlinには委譲の言語サポート(by)もある:
+// class Service(logger: Logger) : Logger by logger`,
+      },
+      {
+        lang: "TypeScript",
+        code: `interface Logger {
+  log(msg: string): void;
+}
+
+class ConsoleLogger implements Logger {
+  log(msg: string) { console.log("[LOG]", msg); }
+}
+
+// 合成: Loggerを持って委譲する
+class ReportService {
+  constructor(private logger: Logger) {}
+
+  generate() {
+    this.logger.log("生成開始");
+    /* … */
+  }
+}
+
+const service = new ReportService(new ConsoleLogger());`,
+      },
+    ],
+    domain: {
+      text: "従業員の「役割」を継承階層(Manager extends Engineer extends…)で表すと、兼務や異動のたびに階層が破綻します。役割や給与計算ポリシーを「持ち物」として合成すれば、組み合わせ・入れ替えが自由です。",
+      code: `// ❌ 継承で役割を表すと、兼務(エンジニア兼マネージャー)や
+//    異動(役割の変更)に対応できない
+class EngineerManager extends Engineer /* かつManagerでもある…? */ {}
+
+// ✅ 役割を「持ち物」として合成する
+interface Role {
+  title: string;
+  allowance(): number;  // 役割手当
+}
+class EngineerRole implements Role {
+  title = "エンジニア";
+  allowance() { return 30_000; }
+}
+class ManagerRole implements Role {
+  title = "マネージャー";
+  allowance() { return 50_000; }
+}
+
+class Employee {
+  private roles: Role[] = [];   // has-a: 複数の役割を持てる(兼務)
+  constructor(public name: string, private baseSalary: number) {}
+
+  assign(role: Role) { this.roles.push(role); }        // 異動も自由
+  monthlyPay(): number {
+    const allowances = this.roles.reduce(
+      (s, r) => s + r.allowance(), 0);
+    return this.baseSalary / 12 + allowances;
+  }
+}
+
+const sato = new Employee("佐藤", 6_000_000);
+sato.assign(new EngineerRole());
+sato.assign(new ManagerRole()); // 兼務も階層の破綻なく表現できる`,
+    },
+  },
+
   // ===================================================
   // SOLID原則
   // ===================================================
