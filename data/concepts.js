@@ -114,6 +114,27 @@ const QUIZ_CONCEPT_GROUPS = {
       },
     ],
   },
+  "microservices": {
+    intro:
+      "マイクロサービスは、アプリケーションを独立してデプロイできる小さなサービスの集合として構成するアーキテクチャです。得られる「独立性」と、引き受ける「分散システムの複雑さ」はトレードオフの関係にあります。分割・通信・整合性・耐障害性・可観測性の順で、その両面を学びます。",
+    groups: [
+      {
+        name: "全体像",
+        description: "マイクロサービスとは何か、いつ採用すべきか",
+        concepts: ["microservices-overview"],
+      },
+      {
+        name: "設計",
+        description: "サービスの分け方と、つなぎ方",
+        concepts: ["service-decomposition", "service-communication"],
+      },
+      {
+        name: "分散システムの現実",
+        description: "整合性・障害・運用と向き合う技術",
+        concepts: ["data-consistency", "resilience", "observability"],
+      },
+    ],
+  },
 };
 
 const QUIZ_CONCEPTS = {
@@ -5456,6 +5477,985 @@ F#での協働のやりやすさ。人間は型を見て
   人間がドメイン知識で絞り込む
 
 判断と検算は人間、パターンと物量はAI`,
+    },
+  },
+
+  // ===================================================
+  // マイクロサービス
+  // ===================================================
+  "microservices-overview": {
+    title: "マイクロサービス(全体像)",
+    what: "マイクロサービスアーキテクチャは、アプリケーションを「独立してデプロイできる小さなサービスの集合」として構成するスタイルです。各サービスはビジネス機能単位で分かれ、ネットワーク越しに連携します。利点は独立性——サービスごとに開発・デプロイ・スケール・技術選定ができ、チームが自律的に動けます。代償は分散システムの複雑さ——通信障害・データ整合性・運用監視の難しさを引き受けます。このため「まずモノリスで作り、必要になってから分割する(モノリスファースト)」が現実的な進め方とされています。",
+    apply: {
+      text: "1つのモノリスを、ビジネス機能単位のサービス群に分割したときの構成の変化です。",
+      code: `── モノリス ─────────────────────────
+┌──────────────────────────┐
+│  経済情報アプリ(1プロセス)          │
+│  企業情報 / 株価 / ニュース / 通知     │
+│  └── 1つの共有DB                  │
+└──────────────────────────┘
+・デプロイは全体で1回(小さな修正でも全体リリース)
+・株価処理の負荷が高くても全体をスケール
+
+── マイクロサービス ──────────────────
+┌─────────┐ ┌─────────┐
+│ 企業情報サービス │ │ 株価サービス     │←負荷に応じて
+│  └─ 専用DB    │ │  └─ 専用DB    │  10台に増設
+└─────────┘ └─────────┘
+┌─────────┐ ┌─────────┐
+│ ニュースサービス │ │ 通知サービス     │
+│  └─ 専用DB    │ │  └─ 専用DB    │
+└─────────┘ └─────────┘
+・各サービスは独立してデプロイ・スケール
+・ただしサービス間はネットワーク通信になり、
+  障害・遅延・整合性の問題を新たに引き受ける`,
+    },
+    benefits: "・サービス単位で独立してデプロイでき、リリースの影響範囲が小さくなる\n・負荷の高いサービスだけをスケールでき、リソース効率が良い\n・チームがサービスを所有し、他チームとの調整を減らして自律的に開発できる\n・サービスごとに適した技術(言語・DB)を選べる\n・注意: これらの利点は「分散システムの複雑さ」との交換。小規模なら分割しない方が速いことも多い",
+    langExamples: [
+      {
+        lang: "Rust",
+        code: `// axumによる最小の「株価サービス」
+// マイクロサービスの単位 = 独立したHTTPサービス
+use axum::{routing::get, Json, Router};
+
+async fn get_price() -> Json<serde_json::Value> {
+    Json(serde_json::json!({
+        "code": "8001",
+        "price": 3450
+    }))
+}
+
+#[tokio::main]
+async fn main() {
+    let app = Router::new()
+        .route("/prices/:code", get(get_price))
+        .route("/health", get(|| async { "OK" }));
+    // このサービスだけで独立してビルド・デプロイできる
+
+    let listener = tokio::net::TcpListener::bind("0.0.0.0:3001")
+        .await.unwrap();
+    axum::serve(listener, app).await.unwrap();
+}`,
+      },
+      {
+        lang: "F#",
+        code: `// ASP.NET Core Minimal APIによる最小の「株価サービス」
+open Microsoft.AspNetCore.Builder
+
+[<EntryPoint>]
+let main args =
+    let builder = WebApplication.CreateBuilder(args)
+    let app = builder.Build()
+
+    app.MapGet("/prices/{code}", fun (code: string) ->
+        {| Code = code; Price = 3450 |}) |> ignore
+
+    app.MapGet("/health", fun () -> "OK") |> ignore
+
+    app.Run("http://0.0.0.0:3001")
+    0
+
+// 各サービスは小さな独立プロジェクト。
+// F#の株価サービスとC#の通知サービスが
+// 共存できるのもマイクロサービスの特徴`,
+      },
+      {
+        lang: "Kotlin",
+        code: `// Ktorによる最小の「株価サービス」
+import io.ktor.server.engine.*
+import io.ktor.server.netty.*
+import io.ktor.server.routing.*
+import io.ktor.server.response.*
+
+fun main() {
+    embeddedServer(Netty, port = 3001) {
+        routing {
+            get("/prices/{code}") {
+                val code = call.parameters["code"]
+                call.respondText(
+                    """{"code":"$code","price":3450}""")
+            }
+            get("/health") { call.respondText("OK") }
+        }
+    }.start(wait = true)
+}
+// このサービス単体でデプロイ・スケールできる`,
+      },
+      {
+        lang: "TypeScript",
+        code: `// Expressによる最小の「株価サービス」
+import express from "express";
+
+const app = express();
+
+app.get("/prices/:code", (req, res) => {
+  res.json({ code: req.params.code, price: 3450 });
+});
+
+// ヘルスチェック: 稼働確認のための定番エンドポイント
+app.get("/health", (_req, res) => res.send("OK"));
+
+app.listen(3001, () => {
+  console.log("price-service listening on :3001");
+});
+
+// package.jsonもDockerfileもこのサービス専用。
+// 他サービスと独立してリリースできる`,
+      },
+    ],
+    domain: {
+      text: "経済情報プラットフォームをマイクロサービス化した全体像です。ビジネス機能ごとにサービスとチームが対応し、それぞれが独立して進化します。",
+      code: `── 経済情報プラットフォームのサービス構成 ──
+
+企業情報サービス(担当: 企業データチーム)
+  企業の基本情報・従業員数などを管理・提供
+  更新頻度は低いが、正確性が命
+
+株価サービス(担当: マーケットデータチーム)
+  リアルタイム株価の取り込みと配信
+  取引時間中は負荷が急増 → 単独で10倍スケール
+
+ニュースサービス(担当: コンテンツチーム)
+  経済ニュースの収集・企業への紐付け
+
+通知サービス(担当: エンゲージメントチーム)
+  ウォッチリスト通知・決算アラートの配信
+
+人事サービス(担当: 社内システムチーム)
+  自社の従業員・アナリストのアカウント管理
+
+── 独立性の効果 ────────────────────
+・決算シーズンに株価サービスだけ増強できる
+・通知の新機能を、株価配信を止めずにリリースできる
+・ニュースサービスの障害が株価表示を道連れにしない
+  (ように設計する。それが以降のテーマ)`,
+    },
+  },
+
+  "service-decomposition": {
+    title: "サービス分割",
+    what: "マイクロサービスの成否は「どこで切るか」で決まります。推奨される単位はビジネスケイパビリティ(業務能力)や、DDDの境界づけられたコンテキストです。技術レイヤー(画面層サービス・DB層サービス)で切るのは典型的な失敗です。また「Database per Service」——各サービスが専用のデータストアを持ち、他サービスのDBを直接触らない——が独立性の土台になります。境界を誤ると、分割したのに密結合な「分散モノリス」が生まれます。",
+    apply: {
+      text: "「よくある失敗の切り方」と「ビジネスケイパビリティによる切り方」の比較です。",
+      code: `── ❌ 技術レイヤーで切る(分散モノリスへの道)──
+  UIサービス → ロジックサービス → DBサービス
+  ・どんな機能追加でも3サービス全部に変更が必要
+  ・「分割したのに常に一緒にデプロイ」になる
+
+── ❌ DBを共有する ─────────────────
+  企業情報サービス ─┐
+  株価サービス   ─┼→ 共有DB(全テーブル)
+  通知サービス   ─┘
+  ・テーブル変更が全サービスに波及
+  ・独立デプロイが事実上不可能に
+
+── ✅ ビジネスケイパビリティ+専用DB ──────
+  企業情報サービス → 企業DB(企業・従業員数)
+  株価サービス   → 株価DB(時系列に強いDB)
+  通知サービス   → 通知DB(配信履歴)
+
+  ・「通知の仕様変更」は通知サービスだけで完結
+  ・他サービスのデータが必要なときは
+    DBを覗かず、APIまたはイベントで受け取る
+  ・株価DBだけ時系列DBにする、といった
+    適材適所の技術選定も可能になる`,
+    },
+    benefits: "・変更が1サービス(1チーム)に閉じ、調整コストとリリースの衝突が減る\n・サービスごとに最適なデータストア(RDB、時系列DB、KVS)を選べる\n・障害・負荷の影響範囲がサービス境界で区切られる\n・境界づけられたコンテキストに沿うと、同じ言葉の混乱(例:「企業」の意味の揺れ)も整理される",
+    langExamples: [
+      {
+        lang: "Rust",
+        code: `// 「自分のDBには直接、他人のデータにはAPIで」
+// を型で表現した企業情報サービスの内部
+
+// 自サービスの専用DBへのアクセス(所有データ)
+struct CompanyRepository {
+    pool: sqlx::PgPool, // 企業DBだけに接続
+}
+impl CompanyRepository {
+    async fn find(&self, code: &str) -> Company {
+        // SELECT * FROM companies WHERE code = ...
+        todo!()
+    }
+}
+
+// 他サービスのデータはHTTPクライアント越しに取得
+// (株価DBへの接続情報はこのサービスには存在しない)
+struct PriceServiceClient {
+    base_url: String,
+}
+impl PriceServiceClient {
+    async fn latest(&self, code: &str) -> f64 {
+        // GET {base_url}/prices/{code}
+        todo!()
+    }
+}`,
+      },
+      {
+        lang: "F#",
+        code: `// 境界づけられたコンテキストを型で表現する
+// 同じ「企業」でも、コンテキストごとに関心が違う
+
+// 企業情報コンテキストの企業(基本情報が主役)
+module CompanyContext =
+    type Company = {
+        Code: string
+        Name: string
+        Industry: string
+        EmployeeCount: int
+    }
+
+// 株価コンテキストの企業(銘柄としての顔だけ)
+module MarketContext =
+    type Instrument = {
+        Code: string       // 共通するのは識別子程度
+        TickSize: decimal  // 呼値の単位
+        TradingUnit: int   // 売買単位
+    }
+
+// 無理に1つのCompany型を共有せず、
+// コンテキストごとに必要な形で持つのが
+// 境界づけられたコンテキストの考え方`,
+      },
+      {
+        lang: "Kotlin",
+        code: `// モジュール構成でサービス境界を表現する
+// (モジュラモノリス: 将来の分割に備えた構造)
+
+// :company-service モジュール
+class CompanyService(
+    private val repo: CompanyRepository,     // 自分のDB
+    private val prices: PriceServiceClient,  // 他所はAPI経由
+) {
+    fun companyWithPrice(code: String): CompanySummary {
+        val company = repo.find(code)         // 所有データ
+        val price = prices.latest(code)       // 借り物データ
+        return CompanySummary(company.name, price)
+    }
+}
+
+// 「他サービスのRepositoryをimportしたらビルドエラー」
+// になるようGradleモジュールの依存を制限しておくと、
+// モノリスのうちから境界を守れる(モノリスファースト)`,
+      },
+      {
+        lang: "TypeScript",
+        code: `// サービスの公開契約(API)と内部実装を分ける
+
+// ── 公開契約: 他サービスにはこれしか見せない ──
+// GET /companies/:code
+interface CompanyResponse {
+  code: string;
+  name: string;
+  industry: string;
+  employeeCount: number;
+}
+
+// ── 内部実装: DBスキーマは自由に変えてよい ──
+interface CompanyRow {           // DBの都合の形
+  company_cd: string;
+  company_nm: string;
+  industry_cd: number;           // 内部ではコード値
+  emp_cnt: number;
+}
+
+function toResponse(row: CompanyRow): CompanyResponse {
+  return {
+    code: row.company_cd,
+    name: row.company_nm,
+    industry: INDUSTRY_NAMES[row.industry_cd],
+    employeeCount: row.emp_cnt,
+  };
+}
+// DBを直接共有しないから、この変換の内側は
+// いつでもリファクタリングできる`,
+      },
+    ],
+    domain: {
+      text: "経済情報プラットフォームで「企業」という言葉が指すものは、コンテキストによって違います。境界づけられたコンテキストで整理すると、自然なサービス境界が見えてきます。",
+      code: `── 「企業」の意味はコンテキストで変わる ──
+
+[企業情報コンテキスト](企業情報サービス)
+  企業 = 基本情報の主体
+  関心: 名前・業種・所在地・従業員数・沿革
+
+[投資コンテキスト](株価サービス)
+  企業 = 銘柄(Instrument)
+  関心: 証券コード・株価・売買単位・上場市場
+
+[人事コンテキスト](人事サービス)
+  企業 = 自社(雇用主)
+  関心: 従業員・部署・給与・アナリストの担当割当
+
+[通知コンテキスト](通知サービス)
+  企業 = ウォッチ対象
+  関心: 誰が(従業員/顧客)どの企業を監視しているか
+
+── 分割の判断に効く質問 ──────────────
+・「従業員数の表示形式を変える」→ 影響は
+  企業情報サービスだけ? → YESなら良い境界
+・「決算アラートの条件を追加」→ 通知サービス
+  だけで完結? → YESなら良い境界
+・どの変更でも3サービス直すハメになる
+  → 境界を疑う(分散モノリスの兆候)`,
+    },
+  },
+
+  "service-communication": {
+    title: "サービス間通信",
+    what: "サービス間の通信には大きく2種類あります。同期通信(REST・gRPC)は「呼んで応答を待つ」方式で、シンプルで直感的な一方、相手の障害・遅延の影響を直接受けます。非同期通信(Kafka・RabbitMQなどのメッセージブローカー経由)は「イベントを発行し、興味のあるサービスが購読する」方式で、送信側と受信側の時間的な結合が切れ、障害にも強くなります。また、クライアントからの入口にはAPI Gatewayを置き、ルーティング・認証・レート制限などの横断的関心事を集約するのが定番です。",
+    apply: {
+      text: "「決算発表があった」という出来事を、同期呼び出しの連鎖から、イベント発行+購読の形に変えた例です。",
+      code: `── ❌ 同期呼び出しの数珠つなぎ ──────────
+決算取込サービスの処理:
+  await notificationService.send(...)   // 通知して
+  await newsService.createArticle(...)  // 記事作って
+  await searchService.reindex(...)      // 索引更新して
+・通知サービスが落ちていると決算取込まで失敗する
+・新しい後続処理が増えるたびに取込側を修正
+
+── ✅ イベントの発行と購読 ─────────────
+決算取込サービスの処理:
+  await broker.publish("earnings.announced", {
+    companyCode: "8001",
+    fiscalYear: 2026,
+    profit: 12_000_000_000,
+  });
+  // 発行したら自分の仕事は完了。誰が聞くかは知らない
+
+購読側(それぞれ独立に処理):
+  通知サービス   : 購読 → ウォッチ中のユーザーに配信
+  ニュースサービス: 購読 → 速報記事を自動生成
+  検索サービス   : 購読 → インデックス更新
+・通知サービスが停止中でもイベントはブローカーに
+  残り、復旧後に処理される
+・後続処理の追加は「新しい購読者を増やすだけ」
+  (Observerパターンの分散システム版)`,
+    },
+    benefits: "・非同期化により、受信側の障害・遅延が送信側に波及しない(時間的結合の切断)\n・後続処理の追加が「購読者の追加」だけで済む(OCPの分散版)\n・API Gatewayで認証・レート制限を一元化し、各サービスを軽くできる\n・使い分けの目安: 即時の応答が必要→同期、出来事の通知・連鎖処理→非同期",
+    langExamples: [
+      {
+        lang: "Rust",
+        code: `// 同期(HTTPクライアント)と非同期(イベント発行)
+
+// 同期: 株価サービスをHTTPで呼ぶ(応答を待つ)
+async fn fetch_price(code: &str) -> Result<f64, reqwest::Error> {
+    let resp = reqwest::Client::new()
+        .get(format!("http://price-service/prices/{code}"))
+        .timeout(std::time::Duration::from_millis(800))
+        .send().await?;                 // タイムアウトは必須
+    let body: serde_json::Value = resp.json().await?;
+    Ok(body["price"].as_f64().unwrap_or(0.0))
+}
+
+// 非同期: 決算イベントを発行(応答を待たない)
+async fn publish_earnings(producer: &KafkaProducer) {
+    let event = serde_json::json!({
+        "type": "earnings.announced",
+        "companyCode": "8001",
+    });
+    producer.send("earnings", event.to_string()).await;
+    // 誰が購読しているかは知らない
+}`,
+      },
+      {
+        lang: "F#",
+        code: `// 同期呼び出しと、イベント購読側の処理
+
+// 同期: HttpClientで株価サービスを呼ぶ
+let fetchPrice (http: HttpClient) code = task {
+    let! resp = http.GetAsync($"http://price-service/prices/{code}")
+    let! body = resp.Content.ReadAsStringAsync()
+    return JsonSerializer.Deserialize<PriceDto>(body)
+}
+
+// 非同期: 決算イベントの購読側(通知サービス)
+let handleEarningsEvent (event: EarningsAnnounced) = task {
+    let! watchers = findWatchers event.CompanyCode
+    for w in watchers do
+        do! sendNotification w event
+    // 決算取込サービスはこの処理の存在を知らない。
+    // このハンドラが遅くても、取込側は影響を受けない
+}`,
+      },
+      {
+        lang: "Kotlin",
+        code: `// API Gatewayのルーティングのイメージ
+
+// クライアントは gateway.example.com だけを知る
+fun Route.gateway() {
+    // 認証・レート制限は玄関で一括処理
+    intercept(ApplicationCallPipeline.Plugins) {
+        verifyJwt(call) ?: return@intercept call.respond(401)
+        rateLimiter.check(call)
+    }
+
+    // パスごとに内部サービスへ振り分け
+    route("/api/companies/{...}") {
+        proxyTo("http://company-service:3000")
+    }
+    route("/api/prices/{...}") {
+        proxyTo("http://price-service:3001")
+    }
+    route("/api/notifications/{...}") {
+        proxyTo("http://notification-service:3002")
+    }
+}
+// 各サービスは認証済みリクエストだけを受け取れる`,
+      },
+      {
+        lang: "TypeScript",
+        code: `// 発行側と購読側が互いを知らない非同期通信
+
+// ── 決算取込サービス(発行側)──
+await broker.publish("earnings.announced", {
+  companyCode: "8001",
+  fiscalYear: 2026,
+  profit: 12_000_000_000,
+});
+// 発行したら完了。通知サービスの稼働状況は無関係
+
+// ── 通知サービス(購読側)──
+broker.subscribe("earnings.announced", async (event) => {
+  const watchers = await watchRepo.findByCompany(
+    event.companyCode);
+  for (const w of watchers) {
+    await push.send(w.userId,
+      event.companyCode + "の決算が発表されました");
+  }
+});
+
+// ── ニュースサービス(もう1つの購読側)──
+broker.subscribe("earnings.announced", async (event) => {
+  await articleGenerator.createFlashReport(event);
+});
+// 購読者が増えても発行側は1文字も変わらない`,
+      },
+    ],
+    domain: {
+      text: "「決算発表」という1つの出来事が経済情報プラットフォーム全体に波及する流れです。同期と非同期の使い分けも整理します。",
+      code: `── 出来事:「アクメ商事が決算を発表」──────
+
+[非同期でつなぐ(出来事の通知)]
+  決算取込サービス
+    └→ publish("earnings.announced")
+         ├→ 通知サービス: ウォッチ中の従業員・顧客へ配信
+         ├→ ニュースサービス: 速報記事を自動生成
+         ├→ 検索サービス: 決算データを索引に追加
+         └→ 分析サービス: 業績予測モデルを再計算
+  それぞれ独立に処理。1つが遅くても他に波及しない
+
+[同期でつなぐ(即時の応答が必要な問い)]
+  企業詳細画面の表示:
+    API Gateway
+      └→ 企業情報サービス(基本情報)…同期GET
+      └→ 株価サービス(現在値)…………同期GET
+  画面は「今の答え」が必要なので同期で問い合わせ、
+  タイムアウト・フォールバックとセットで守る
+
+── 使い分けの目安 ──────────────────
+「〜が起きた」を伝える → 非同期イベント
+「〜を教えて」と尋ねる → 同期API(+防御)`,
+    },
+  },
+
+  "data-consistency": {
+    title: "データ整合性とSaga",
+    what: "Database per Serviceの代償として、複数サービスにまたがる更新を1つのトランザクションで守れなくなります。分散トランザクション(2相コミット)は可用性・性能面で避けられることが多く、代わりに使われるのがSagaパターン——各サービスのローカルトランザクションを連鎖させ、途中で失敗したら補償処理(逆向きの操作)で巻き戻す方式です。その前提となるのが結果整合性(Eventual Consistency)——「一時的な不整合を許容し、最終的に一致すればよい」という考え方で、どこまでのズレを業務的に許容できるかが設計の鍵になります。",
+    apply: {
+      text: "「有料プランへのアップグレード」処理をSagaで組んだ例です。各ステップに補償処理(取り消し)を対で用意します。",
+      code: `── Saga: 有料プラン加入の流れ ─────────
+ステップ1: 課金サービス
+  実行:   クレジットカードに課金
+  補償:   返金する
+
+ステップ2: アカウントサービス
+  実行:   プランをPremiumに変更
+  補償:   プランをFreeに戻す
+
+ステップ3: 通知サービス
+  実行:   加入完了メールを送信
+  補償:   (なし: 失敗しても致命的でない)
+
+── 正常系 ──────────────────────
+課金OK → プラン変更OK → メール送信OK → 完了
+
+── 異常系: ステップ2で失敗 ─────────────
+課金OK → プラン変更失敗!
+  → 補償を逆順に実行: 課金を返金
+  → 全体として「何もなかった」状態に収束
+
+── ポイント ─────────────────────
+・各ステップは自サービス内のローカルトランザクション
+・「全体ロック」は存在しない。途中状態は外から見える
+  (例: 課金済みだがまだFreeの瞬間がある)
+・だから補償と冪等性(再実行しても安全)が必須`,
+    },
+    benefits: "・サービス間でDBロックを共有しないため、可用性とスケーラビリティを保てる\n・失敗時の振る舞い(補償)が明示的に設計され、「途中で止まったら?」に答えがある\n・結果整合性を受け入れることで、一部サービスが遅くても全体は前に進める\n・注意: 「残高表示が数秒古い」等のズレを業務が許容できるか、必ずドメインの目で確認する",
+    langExamples: [
+      {
+        lang: "Rust",
+        code: `// Sagaの各ステップを「実行+補償」の対で表現
+struct SagaStep {
+    name: &'static str,
+    execute: fn() -> Result<(), String>,
+    compensate: fn(),
+}
+
+fn run_saga(steps: &[SagaStep]) -> Result<(), String> {
+    let mut done: Vec<&SagaStep> = Vec::new();
+
+    for step in steps {
+        match (step.execute)() {
+            Ok(()) => done.push(step),
+            Err(e) => {
+                // 失敗: 完了済みステップを逆順に補償
+                for s in done.iter().rev() {
+                    (s.compensate)();
+                }
+                return Err(format!("{}で失敗: {e}", step.name));
+            }
+        }
+    }
+    Ok(())
+}`,
+      },
+      {
+        lang: "F#",
+        code: `// Result型の連鎖でSagaの流れを表現する
+type Step = {
+    Name: string
+    Execute: unit -> Result<unit, string>
+    Compensate: unit -> unit
+}
+
+let runSaga (steps: Step list) =
+    let rec go completed remaining =
+        match remaining with
+        | [] -> Ok ()
+        | step :: rest ->
+            match step.Execute() with
+            | Ok () -> go (step :: completed) rest
+            | Error e ->
+                // 完了済みを逆順に補償(completedは既に逆順)
+                completed |> List.iter (fun s -> s.Compensate())
+                Error $"{step.Name}で失敗: {e}"
+    go [] steps`,
+      },
+      {
+        lang: "Kotlin",
+        code: `// 冪等性: Sagaの再実行・メッセージ再配達に備える
+// 「同じ操作が2回届いても結果は1回分」にする
+
+class ChargeService(private val db: Database) {
+    // 冪等キー(注文IDなど)で二重課金を防ぐ
+    fun charge(idempotencyKey: String, amount: Long): ChargeResult {
+        val existing = db.findCharge(idempotencyKey)
+        if (existing != null) {
+            // 2回目の呼び出し: 何もせず前回の結果を返す
+            return existing.result
+        }
+        val result = paymentGateway.charge(amount)
+        db.saveCharge(idempotencyKey, result)
+        return result
+    }
+}
+// メッセージブローカーは「少なくとも1回」配達が
+// 普通なので、受信側の冪等化はSagaの必須要素`,
+      },
+      {
+        lang: "TypeScript",
+        code: `// Sagaオーケストレーター: 手順と補償を一望できる形に
+type SagaStep = {
+  name: string;
+  execute: () => Promise<void>;
+  compensate: () => Promise<void>;
+};
+
+async function runSaga(steps: SagaStep[]) {
+  const done: SagaStep[] = [];
+  for (const step of steps) {
+    try {
+      await step.execute();
+      done.push(step);
+    } catch (e) {
+      // 逆順に補償して巻き戻す
+      for (const s of done.reverse()) {
+        await s.compensate();
+      }
+      throw new Error(step.name + "で失敗、補償済み");
+    }
+  }
+}
+
+await runSaga([
+  { name: "課金", execute: chargeCard, compensate: refund },
+  { name: "プラン変更", execute: upgrade, compensate: downgrade },
+]);`,
+      },
+    ],
+    domain: {
+      text: "経済情報プラットフォームでの整合性設計の実例です。「どこまでのズレを許容できるか」はデータの性質によって大きく異なります。",
+      code: `── ズレを許容できるもの(結果整合性でOK)──
+
+・ニュース記事への企業タグ付け
+  数十秒遅れても業務影響なし
+・ウォッチリストの企業数バッジ
+  「実は1件多い」瞬間があっても許容
+・検索インデックスへの決算反映
+  「反映まで最大1分」とSLAを明示すれば十分
+
+── ズレが許されないもの(強い整合性が必要)──
+
+・有料データの課金と閲覧権限
+  「課金されたのに見られない」はクレーム直行
+  → Sagaで補償を用意し、途中状態を最小化
+・約定(株の売買成立)処理
+  こういう部分はそもそも1サービス内に閉じる
+  ように境界を切る(分散させない)のが最善
+
+── Sagaの例: 従業員のウォッチリスト登録 ──
+1. ウォッチサービス: 登録を保存
+2. 通知サービス: 決算アラートを購読設定
+3. 2が失敗 → 補償: ウォッチ登録を削除し
+   「時間をおいて再試行してください」と表示
+整合性の設計は技術だけでなく
+「業務がどこまで許せるか」の対話で決まる`,
+    },
+  },
+
+  "resilience": {
+    title: "耐障害性",
+    what: "マイクロサービスでは「どこかのサービスは常に壊れているかもしれない」前提で設計します。最大の敵はカスケード障害——障害中のサービスを呼び続けた結果、待たされたリソースが枯渇し、呼び出し元まで連鎖的に倒れる現象です。防御の基本は、タイムアウト(無限に待たない)、リトライ(指数バックオフ+回数制限+冪等性)、サーキットブレーカー(障害を検知したら一定時間呼び出しを遮断)、フォールバック(代替の応答を返す)の組み合わせです。",
+    apply: {
+      text: "無防備な呼び出しに、タイムアウト→リトライ→サーキットブレーカー→フォールバックの防御を重ねます。",
+      code: `── ❌ 無防備な呼び出し ─────────────
+const price = await fetch("http://price-service/prices/8001");
+// 株価サービスが応答しないと、このリクエストは
+// 永遠に待つ。待つ間もスレッド・接続は占有され、
+// 溜まった末にこちらのサービスも応答不能に(連鎖障害)
+
+── ✅ 多層の防御 ────────────────────
+// 1. タイムアウト: 無限に待たない
+const price = await fetchWithTimeout(url, { timeout: 800 });
+
+// 2. リトライ: 間隔を空けて限定的に(冪等なGETのみ)
+//    1回目失敗 → 200ms待つ → 2回目 → 400ms → 3回目まで
+
+// 3. サーキットブレーカー: 失敗が続いたら遮断
+//    直近10回中5回失敗 → 30秒間は呼ばずに即エラー
+//    30秒後、試しに1本だけ通す(半開)→ 成功なら復帰
+
+// 4. フォールバック: 遮断中の代替応答
+//    キャッシュの最終価格 + 「5分前の値」表示
+
+結果: 株価サービスが全滅しても、
+企業情報画面は「少し古い株価つき」で生き残る`,
+    },
+    benefits: "・1サービスの障害が全体に連鎖する事故(カスケード障害)を防げる\n・フォールバックにより「機能低下はするが止まらない」段階的な劣化を実現できる\n・タイムアウトとブレーカーで障害の影響時間・範囲が予測可能になる\n・注意: リトライは冪等な操作に限定し、指数バックオフを入れないと自分が攻撃者(リトライストーム)になる",
+    langExamples: [
+      {
+        lang: "Rust",
+        code: `// タイムアウト+限定リトライ(指数バックオフ)
+use std::time::Duration;
+
+async fn fetch_with_retry(url: &str) -> Result<String, String> {
+    let client = reqwest::Client::new();
+    let mut wait = Duration::from_millis(200);
+
+    for attempt in 1..=3 {
+        let result = client.get(url)
+            .timeout(Duration::from_millis(800)) // 1. 待ちすぎない
+            .send().await;
+
+        match result {
+            Ok(resp) if resp.status().is_success() => {
+                return resp.text().await.map_err(|e| e.to_string());
+            }
+            _ if attempt < 3 => {
+                tokio::time::sleep(wait).await;  // 2. 間隔を空けて
+                wait *= 2;                        //    指数バックオフ
+            }
+            _ => break,
+        }
+    }
+    Err("3回失敗。フォールバックへ".into())
+}`,
+      },
+      {
+        lang: "F#",
+        code: `// シンプルなサーキットブレーカーの状態遷移
+type BreakerState =
+    | Closed of failureCount: int   // 通常: 通す
+    | Open of until: System.DateTime // 遮断: 即失敗
+    | HalfOpen                       // 試験: 1本だけ通す
+
+let next state result threshold =
+    match state, result with
+    | Closed n, Error _ when n + 1 >= threshold ->
+        // 失敗が閾値に達したら30秒遮断
+        Open (System.DateTime.UtcNow.AddSeconds 30.0)
+    | Closed n, Error _ -> Closed (n + 1)
+    | Closed _, Ok _ -> Closed 0
+    | Open until, _ when System.DateTime.UtcNow > until ->
+        HalfOpen                     // 期限が来たら試験モード
+    | Open u, _ -> Open u
+    | HalfOpen, Ok _ -> Closed 0     // 回復を確認して復帰
+    | HalfOpen, Error _ ->
+        Open (System.DateTime.UtcNow.AddSeconds 30.0)`,
+      },
+      {
+        lang: "Kotlin",
+        code: `// フォールバック: 障害時の代替応答を用意する
+class PriceClient(
+    private val http: HttpClient,
+    private val cache: PriceCache,
+    private val breaker: CircuitBreaker,
+) {
+    suspend fun latestPrice(code: String): PriceView {
+        // ブレーカーが開いていたら即フォールバック
+        if (breaker.isOpen()) return fallback(code)
+
+        return try {
+            withTimeout(800) {
+                val p = http.get("http://price-service/prices/$code")
+                cache.put(code, p)          // 成功時はキャッシュ更新
+                breaker.recordSuccess()
+                PriceView(p, isStale = false)
+            }
+        } catch (e: Exception) {
+            breaker.recordFailure()
+            fallback(code)
+        }
+    }
+
+    // 代替: キャッシュの最終値を「古い値」と明示して返す
+    private fun fallback(code: String): PriceView =
+        PriceView(cache.get(code), isStale = true)
+}`,
+      },
+      {
+        lang: "TypeScript",
+        code: `// タイムアウト+ブレーカー+フォールバックの合わせ技
+const breaker = new CircuitBreaker({
+  failureThreshold: 5,    // 直近5回失敗で
+  resetTimeoutMs: 30_000, // 30秒間は遮断
+});
+
+async function getPrice(code: string): Promise<PriceView> {
+  if (breaker.isOpen()) return fallback(code); // 即座に代替
+
+  try {
+    const resp = await fetch(
+      "http://price-service/prices/" + code,
+      { signal: AbortSignal.timeout(800) },    // タイムアウト
+    );
+    if (!resp.ok) throw new Error("HTTP " + resp.status);
+    const price = await resp.json();
+    breaker.recordSuccess();
+    priceCache.set(code, price);
+    return { ...price, isStale: false };
+  } catch (e) {
+    breaker.recordFailure();
+    return fallback(code);
+  }
+}
+
+function fallback(code: string): PriceView {
+  const cached = priceCache.get(code);   // 最終取得値
+  return { ...cached, isStale: true };   // 「古い」と明示
+}`,
+      },
+    ],
+    domain: {
+      text: "決算シーズンのピーク時に株価サービスが過負荷で倒れた、という現実的なシナリオで、防御の有無による差を見ます。",
+      code: `── シナリオ: 決算集中日、株価サービスが過負荷 ──
+
+[防御なしの場合]
+15:00 株価サービスの応答が10秒超に悪化
+15:02 企業情報サービスのスレッドが株価待ちで枯渇
+      → 企業情報も応答不能に(カスケード障害)
+15:05 API Gatewayまで詰まり、全画面が白くなる
+      → 株価と無関係な従業員の人事画面まで停止
+15:30 全サービス再起動でようやく復旧
+
+[防御ありの場合]
+15:00 株価サービスの応答が悪化
+15:00 タイムアウト(800ms)が発動し始める
+15:01 サーキットブレーカーが開く
+      → 企業情報サービスは即フォールバックに切替
+      → 画面には「15:00時点の株価」と注記つきで表示
+15:01 通知サービスは非同期なので影響なし
+      (イベントはブローカーに溜まり、後で処理)
+15:20 株価サービスが回復。ブレーカーが半開→閉
+      → 自動で通常表示に復帰。人手の介入ゼロ
+
+── 教訓 ────────────────────────
+「株価が最新でない」と「サイト全体が落ちる」なら
+前者を選ぶ。その選択を設計に埋め込むのが耐障害性`,
+    },
+  },
+
+  "observability": {
+    title: "可観測性(Observability)",
+    what: "マイクロサービスでは、1つのリクエストが多数のサービスをまたぐため、「どこで遅い?」「どこで失敗した?」がモノリスのスタックトレースのようには分かりません。可観測性の3本柱は、①ログ(何が起きたかの記録。全サービス分を集約基盤に集める)、②メトリクス(リクエスト数・エラー率・レイテンシなどの数値)、③分散トレーシング(トレースIDをリクエストに引き回し、サービス横断の処理の流れと所要時間を可視化)。この3つが揃って初めて、分散システムを運用できる状態になります。",
+    apply: {
+      text: "「トレースIDの引き回し」が分散トレーシングの核心です。入口で発行し、すべてのサービス呼び出し・ログに含めます。",
+      code: `── トレースIDのライフサイクル ─────────
+
+1. API Gatewayがリクエスト受信時にIDを発行
+   trace-id: 7f3a...
+
+2. 内部サービスを呼ぶときヘッダで伝搬
+   GET /companies/8001
+   headers: { "traceparent": "7f3a..." }
+
+3. 各サービスはログに必ずトレースIDを含める
+   {"level":"info","traceId":"7f3a...",
+    "service":"company-service","msg":"企業取得",
+    "durationMs":12}
+   {"level":"error","traceId":"7f3a...",
+    "service":"price-service","msg":"DB接続失敗"}
+
+4. 集約基盤でトレースIDで検索すると、
+   1リクエストの全サービスの動きが時系列で並ぶ:
+
+   gateway          ├──────────────┤ 1450ms
+    company-service ├──┤ 120ms
+    price-service   ├───────────┤ 1300ms ← 犯人
+      └ DB接続リトライ ├──────┤ 1100ms ← 真犯人
+
+「画面が遅い」から「price-serviceのDB接続」まで
+数分でたどり着けるのが可観測性の力`,
+    },
+    benefits: "・障害調査が「全サーバーにSSHしてログを目視」から「トレースIDで一発検索」になる\n・遅延の犯人(どのサービスのどの処理か)をウォーターフォール図で特定できる\n・エラー率・レイテンシのメトリクスで、ユーザーが気づく前に異常を検知できる\n・「デプロイ直後にエラー率が上がった」など、変更と障害の関連づけが速くなる",
+    langExamples: [
+      {
+        lang: "Rust",
+        code: `// tracingクレートによる構造化ログ+スパン
+use tracing::{info, instrument};
+
+// #[instrument]で関数がトレースのスパンになり、
+// 引数と所要時間が自動記録される
+#[instrument(fields(company_code = %code))]
+async fn get_company_summary(code: &str) -> Summary {
+    info!("企業サマリー作成開始");
+
+    let company = fetch_company(code).await;  // 子スパン
+    let price = fetch_price(code).await;      // 子スパン
+
+    info!(price, "サマリー作成完了");
+    Summary::new(company, price)
+}
+
+// OpenTelemetryエクスポーターを設定すれば、
+// このスパン情報がそのまま分散トレーシング基盤
+// (Jaeger等)に送られ、横断的に可視化される`,
+      },
+      {
+        lang: "F#",
+        code: `// .NETのActivity(OpenTelemetry標準)でスパンを作る
+open System.Diagnostics
+
+let source = new ActivitySource("company-service")
+
+let getCompanySummary (code: string) = task {
+    // スパン開始: トレースIDは自動で親から引き継がれる
+    use activity = source.StartActivity("get-company-summary")
+    activity.SetTag("company.code", code) |> ignore
+
+    let! company = fetchCompany code
+    let! price = fetchPrice code   // HttpClientが自動で
+                                   // traceparentヘッダを伝搬
+
+    activity.SetTag("price", price) |> ignore
+    return { Company = company; Price = price }
+}
+// ASP.NET Core + OpenTelemetryなら、HTTP境界の
+// トレースID伝搬は設定だけでほぼ自動化できる`,
+      },
+      {
+        lang: "Kotlin",
+        code: `// 構造化ログにトレースIDを必ず含める(MDC)
+import org.slf4j.MDC
+
+// ミドルウェア: 受信時にトレースIDをMDCへ
+fun Application.tracing() {
+    intercept(ApplicationCallPipeline.Plugins) {
+        val traceId = call.request.headers["traceparent"]
+            ?: generateTraceId()
+        MDC.put("traceId", traceId)  // 以降のログ全部に付く
+        try {
+            proceed()
+        } finally {
+            MDC.remove("traceId")
+        }
+    }
+}
+
+// ログ出力(JSONエンコーダ設定済みとする)
+logger.info("企業取得開始")
+// → {"ts":"...","level":"INFO","traceId":"7f3a...",
+//    "service":"company-service","msg":"企業取得開始"}
+// 集約基盤でtraceId検索すれば全サービス分が並ぶ`,
+      },
+      {
+        lang: "TypeScript",
+        code: `// Expressミドルウェアでトレース文脈を引き回す
+import { randomUUID } from "crypto";
+
+// 1. 入口: トレースIDを取り出す(なければ発行)
+app.use((req, _res, next) => {
+  req.traceId =
+    req.headers["traceparent"]?.toString() ?? randomUUID();
+  next();
+});
+
+// 2. ログは常にトレースID付きの構造化JSONで
+function log(req: Request, msg: string, extra = {}) {
+  console.log(JSON.stringify({
+    ts: new Date().toISOString(),
+    service: "company-service",
+    traceId: req.traceId,
+    msg,
+    ...extra,
+  }));
+}
+
+// 3. 内部サービスを呼ぶときはヘッダで伝搬
+await fetch("http://price-service/prices/" + code, {
+  headers: { traceparent: req.traceId },
+});
+// OpenTelemetry SDKを使えば1〜3はほぼ自動化できる`,
+      },
+    ],
+    domain: {
+      text: "「アナリスト(従業員)から『企業詳細画面が重い』と報告が来た」という日常的な調査を、可観測性の3本柱で解決する流れです。",
+      code: `── 調査: 「企業詳細画面が重い」──────────
+
+1. メトリクスで全体像をつかむ
+   ダッシュボード確認:
+   ・企業情報サービス p99レイテンシ: 平常
+   ・株価サービス p99: 200ms → 3秒に悪化 ← ここ
+   ・悪化開始: 14:30(株価サービスのデプロイ直後)
+
+2. トレースで犯人の処理を特定
+   遅いリクエストのトレースを開く:
+   gateway            ├────────────┤ 3.2s
+    company-service   ├─┤ 90ms
+    price-service     ├──────────┤ 3.0s
+      └ 履歴クエリ×30回 ├─────────┤ 2.9s ← N+1!
+
+3. ログで詳細を確認
+   traceIdで検索 → 14:30のリリースで
+   「チャート用に30日分を1日ずつ取得する」
+   コードが混入していたと判明
+
+4. 対処と再発防止
+   ・ロールバック(メトリクスが平常に戻るのを確認)
+   ・「株価サービスのp99が500ms超で警報」を追加
+   → 次からはユーザーの報告より先に気づける
+
+障害対応の速さは、可観測性への事前投資で決まる`,
     },
   },
 };
