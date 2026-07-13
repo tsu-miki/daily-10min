@@ -72,6 +72,48 @@ const QUIZ_CONCEPT_GROUPS = {
       },
     ],
   },
+  "clean-architecture": {
+    intro:
+      "クリーンアーキテクチャは、ビジネスルールをフレームワーク・DB・UIなどの「詳細」から独立させるためのアーキテクチャ指針です。同心円のレイヤー構成と、たった1つの絶対ルール「依存は内側へ」を軸に理解していきます。SOLID原則(特にDIP)が土台になっています。",
+    groups: [
+      {
+        name: "全体像とルール",
+        description: "同心円の構成と、唯一の絶対ルール",
+        concepts: ["clean-arch-overview", "dependency-rule"],
+      },
+      {
+        name: "内側のレイヤー",
+        description: "アーキテクチャの主役となるビジネスルールの層",
+        concepts: ["entities", "usecases"],
+      },
+      {
+        name: "外側のレイヤー",
+        description: "変換係と、交換可能な「詳細」",
+        concepts: ["interface-adapters", "details-outside"],
+      },
+    ],
+  },
+  "vibe-coding": {
+    intro:
+      "バイブコーディングは、自然言語でAIに指示してコードを書かせる開発スタイルです。うまく使えば開発速度が劇的に上がる一方、検証・セキュリティ・責任といった新しい注意点もあります。「速く作る技術」と「安全に取り込む技術」をセットで学びます。",
+    groups: [
+      {
+        name: "全体像",
+        description: "バイブコーディングとは何か、どこで使うべきか",
+        concepts: ["vibe-coding-overview"],
+      },
+      {
+        name: "実践テクニック",
+        description: "AIへの指示の出し方と、反復のリズム",
+        concepts: ["prompting", "iteration"],
+      },
+      {
+        name: "品質と責任",
+        description: "生成コードの検証、セキュリティ、人間とAIの分担",
+        concepts: ["review-verification", "security-quality", "ai-collaboration"],
+      },
+    ],
+  },
 };
 
 const QUIZ_CONCEPTS = {
@@ -3764,6 +3806,1656 @@ function buildDashboard(factory: MarketFactory, company: Company) {
   const price = factory.createPriceProvider().latest(company.code);
   return factory.createFormatter().format(price);
 }`,
+    },
+  },
+
+  // ===================================================
+  // クリーンアーキテクチャ
+  // ===================================================
+  "clean-arch-overview": {
+    title: "クリーンアーキテクチャ(全体像)",
+    what: "クリーンアーキテクチャは、Robert C. Martinが提唱した、ビジネスルールをフレームワーク・DB・UIなどの「詳細」から独立させるアーキテクチャ指針です。同心円で表され、内側から エンティティ → ユースケース → インターフェースアダプター → フレームワーク&ドライバー の4層が基本形です。内側ほど抽象度が高く安定し、外側ほど具体的で変わりやすいものを置きます。ヘキサゴナル(ポート&アダプター)やオニオンアーキテクチャと狙いは共通です。",
+    apply: {
+      text: "「Webフレームワークの中にビジネスロジックを書く」構成を、レイヤーごとに分離した構成に変えます。",
+      code: `// ❌ Before: ルーティング関数の中に全部入り
+app.post("/hire", async (req, res) => {
+  if (req.body.salary < 0) return res.status(400).send();
+  await db.query("INSERT INTO employees ...", [req.body.name]);
+  res.json({ ok: true });
+  // 業務ルール・SQL・HTTPが混ざり、テストにはWebとDBが必要
+});
+
+// ✅ After: 同心円のレイヤーに分離
+// [エンティティ] 最重要ルール(何にも依存しない)
+class Employee {
+  constructor(public name: string, public salary: number) {
+    if (salary < 0) throw new Error("給与は0未満にできない");
+  }
+}
+// [ユースケース] アプリ固有の手順(内側と自層の抽象のみ参照)
+class HireEmployee {
+  constructor(private repo: EmployeeRepository) {}
+  async run(name: string, salary: number) {
+    await this.repo.save(new Employee(name, salary));
+  }
+}
+// [アダプター] HTTP形式 ⇔ ユースケース形式の変換
+// [詳細] Express・DBドライバは最外周で組み立てる`,
+    },
+    benefits: "・重要なビジネスルールがUI・DB・フレームワークの変更に巻き込まれない\n・エンティティとユースケースを、Web/DBなしの高速なテストで検証できる\n・「どのDBを使うか」などの決定を遅らせられる(詳細は後から差し替え可能)\n・レイヤーごとに関心が分かれ、どこに何を書くべきかの共通言語ができる",
+    langExamples: [
+      {
+        lang: "Rust",
+        code: `// エンティティ: 何にも依存しない
+struct Employee {
+    name: String,
+    salary: u64,
+}
+
+// ユースケース層が所有するポート(抽象)
+trait EmployeeRepository {
+    fn save(&self, employee: &Employee);
+}
+
+// ユースケース: エンティティとポートだけを知る
+struct HireEmployee<R: EmployeeRepository> {
+    repo: R,
+}
+impl<R: EmployeeRepository> HireEmployee<R> {
+    fn run(&self, name: &str, salary: u64) {
+        let employee = Employee {
+            name: name.into(),
+            salary,
+        };
+        self.repo.save(&employee);
+    }
+}
+// DB実装(impl EmployeeRepository for PostgresRepo)は外側の層に置く`,
+      },
+      {
+        lang: "F#",
+        code: `// エンティティ: 純粋なレコードとルール
+type Employee = { Name: string; Salary: int64 }
+
+// ユースケース層が所有するポート
+type IEmployeeRepository =
+    abstract Save: Employee -> unit
+
+// ユースケース: 内側と自層の抽象だけを参照する
+type HireEmployee(repo: IEmployeeRepository) =
+    member _.Run(name, salary) =
+        if salary < 0L then invalidArg "salary" "給与は0未満にできない"
+        repo.Save { Name = name; Salary = salary }
+
+// DB実装・Webハンドラは外側で組み立てる(関数注入でも可)`,
+      },
+      {
+        lang: "Kotlin",
+        code: `// エンティティ: フレームワーク非依存
+class Employee(val name: String, val salary: Long) {
+    init { require(salary >= 0) { "給与は0未満にできない" } }
+}
+
+// ユースケース層が所有するポート
+interface EmployeeRepository {
+    fun save(employee: Employee)
+}
+
+// ユースケース: エンティティとポートだけを知る
+class HireEmployee(private val repo: EmployeeRepository) {
+    fun run(name: String, salary: Long) {
+        repo.save(Employee(name, salary))
+    }
+}
+// Spring等のフレームワークやDB実装は最外周のモジュールに置く`,
+      },
+      {
+        lang: "TypeScript",
+        code: `// エンティティ: 何にも依存しない
+class Employee {
+  constructor(public name: string, public salary: number) {
+    if (salary < 0) throw new Error("給与は0未満にできない");
+  }
+}
+
+// ユースケース層が所有するポート
+interface EmployeeRepository {
+  save(employee: Employee): Promise<void>;
+}
+
+// ユースケース: エンティティとポートだけを知る
+class HireEmployee {
+  constructor(private repo: EmployeeRepository) {}
+  async run(name: string, salary: number) {
+    await this.repo.save(new Employee(name, salary));
+  }
+}
+// Express・Prisma等は最外周で接続する`,
+    },
+    ],
+    domain: {
+      text: "企業・従業員を扱う経済情報アプリを4層に整理した例です。各レイヤーの役割と置くものが一目で分かるように、依存の向き(→は「参照する」)も添えています。",
+      code: `// [1. エンティティ] 企業横断の最重要ルール(依存なし)
+//   Company, Employee, 「給与は0未満にできない」等の業務ルール
+class Company {
+  private employees: Employee[] = [];
+  hire(e: Employee) {
+    if (this.employees.length >= 10_000) {
+      throw new Error("雇用上限を超過");  // 業務ルール
+    }
+    this.employees.push(e);
+  }
+}
+
+// [2. ユースケース] アプリ固有の手順(→ エンティティ)
+//   「企業に従業員を雇用する」「決算レポートを出す」
+//   + 自層で定義するポート: CompanyRepository, ReportOutput
+
+// [3. インターフェースアダプター] 形式の変換(→ ユースケース)
+//   HireController: HTTPリクエスト → ユースケースの入力へ変換
+//   CompanyGateway: ポートを実装し、SQLの結果 ⇔ エンティティを変換
+
+// [4. フレームワーク&ドライバー] 詳細(→ アダプター)
+//   Express / PostgreSQL / React などの道具と起動・配線コード
+
+// 依存はつねに 4 → 3 → 2 → 1 の内向きだけ。
+// 「DBを乗り換える」変更は3と4だけで完結し、1と2は無傷で済む`,
+    },
+  },
+
+  "dependency-rule": {
+    title: "依存性のルール",
+    what: "依存性のルール(The Dependency Rule)は、クリーンアーキテクチャで唯一の絶対ルールです。「ソースコードの依存は、内側(抽象度の高い方)にのみ向かってよい」——内側の円は、外側の円に定義された名前(クラス・関数・変数)を一切参照してはいけません。内側が外側の機能(DB保存など)を必要とする場合は、内側がインターフェース(ポート)を定義し、外側が実装します(SOLIDのDIP)。実行時の制御が外へ流れても、ソースコードの依存は内向きのまま保てます。",
+    apply: {
+      text: "ユースケースがDBライブラリを直接importしている違反状態を、ポート(内側が所有する抽象)+実装(外側)に分離します。",
+      code: `// ❌ Before: 内側(ユースケース)が外側(DBライブラリ)に依存
+import { MySqlClient } from "mysql-driver";  // 依存が外向き!
+
+class HireEmployee {
+  private db = new MySqlClient("mysql://...");
+  async run(name: string) {
+    await this.db.query("INSERT INTO employees ...", [name]);
+  }
+}
+
+// ✅ After: 内側がポートを定義し、外側が実装する
+// --- ユースケース層(内側) ---
+interface EmployeeRepository {          // 内側が所有する抽象
+  save(employee: Employee): Promise<void>;
+}
+class HireEmployee {
+  constructor(private repo: EmployeeRepository) {}
+  async run(name: string, salary: number) {
+    await this.repo.save(new Employee(name, salary));
+  }
+}
+
+// --- インフラ層(外側) ---
+import { MySqlClient } from "mysql-driver"; // 外側ならOK
+class MySqlEmployeeRepository implements EmployeeRepository {
+  async save(e: Employee) { /* INSERT文を発行 */ }
+}
+// 依存の向き: 外側(MySql実装) → 内側(ポート)。ルール遵守`,
+    },
+    benefits: "・外側(DB・フレームワーク)の変更が内側の重要なコードに波及しない\n・内側だけを取り出してテストできる(外側はモックに差し替え)\n・「この import は内向きか?」というシンプルな基準でレビューできる\n・実装の乗り換え(MySQL→PostgreSQL)が外側の差し替えだけで済む",
+    langExamples: [
+      {
+        lang: "Rust",
+        code: `// 内側のクレート(モジュール): ポートを所有
+mod usecase {
+    pub trait EmployeeRepository {
+        fn save(&self, name: &str);
+    }
+
+    pub struct HireEmployee<R: EmployeeRepository> {
+        pub repo: R,
+    }
+    impl<R: EmployeeRepository> HireEmployee<R> {
+        pub fn run(&self, name: &str) {
+            self.repo.save(name);
+        }
+    }
+}
+
+// 外側のモジュール: 内側のポートを実装する(依存は内向き)
+mod infra {
+    use super::usecase::EmployeeRepository;
+
+    pub struct PostgresRepository;
+    impl EmployeeRepository for PostgresRepository {
+        fn save(&self, _name: &str) { /* SQL発行 */ }
+    }
+}`,
+      },
+      {
+        lang: "F#",
+        code: `// 内側: ポートの定義とユースケース
+module UseCase =
+    type IEmployeeRepository =
+        abstract Save: name: string -> unit
+
+    let hireEmployee (repo: IEmployeeRepository) name =
+        repo.Save name
+
+// 外側: 内側のポートを実装(依存は内向き)
+module Infra =
+    open UseCase
+
+    type PostgresRepository() =
+        interface IEmployeeRepository with
+            member _.Save name = () // SQL発行
+
+// F#はプロジェクト内でファイルの後方参照ができないため、
+// 「内側を先に定義する」構造がコンパイラで強制される`,
+      },
+      {
+        lang: "Kotlin",
+        code: `// 内側のモジュール(usecase): ポートを所有
+interface EmployeeRepository {
+    fun save(name: String)
+}
+
+class HireEmployee(private val repo: EmployeeRepository) {
+    fun run(name: String) = repo.save(name)
+}
+
+// 外側のモジュール(infra): 内側に依存して実装
+class PostgresEmployeeRepository : EmployeeRepository {
+    override fun save(name: String) { /* SQL発行 */ }
+}
+
+// Gradleのモジュール分割で「infra → usecase」の
+// 一方向依存をビルドレベルで強制できる`,
+      },
+      {
+        lang: "TypeScript",
+        code: `// 内側(usecase/): ポートを所有
+export interface EmployeeRepository {
+  save(name: string): Promise<void>;
+}
+
+export class HireEmployee {
+  constructor(private repo: EmployeeRepository) {}
+  run(name: string) { return this.repo.save(name); }
+}
+
+// 外側(infra/): 内側のポートを実装(importは内向き)
+import { EmployeeRepository } from "../usecase/ports";
+
+export class PostgresEmployeeRepository implements EmployeeRepository {
+  async save(name: string) { /* SQL発行 */ }
+}
+
+// ESLintのimportルールで「usecase/はinfra/を
+// importできない」を機械的に強制できる`,
+      },
+    ],
+    domain: {
+      text: "「株価データの取得元を大手ベンダーAPIから取引所直結に乗り換える」というよくある変更を、依存性のルールが守られている場合とそうでない場合で比べます。",
+      code: `// 内側(ユースケース層)が所有するポート
+interface StockPriceProvider {
+  latest(company: Company): Promise<number>;
+}
+
+// ユースケース: 従業員(アナリスト)向けのウォッチリスト評価
+class EvaluateWatchList {
+  constructor(private prices: StockPriceProvider) {}
+  async run(companies: Company[]): Promise<number> {
+    let total = 0;
+    for (const c of companies) total += await this.prices.latest(c);
+    return total;
+  }
+}
+
+// 外側: ベンダーAPI実装(v1)
+class VendorApiProvider implements StockPriceProvider {
+  async latest(c: Company) { /* ベンダーSDK呼び出し */ return 0; }
+}
+// 外側: 取引所直結実装(v2)— 乗り換えはこのクラスを足すだけ
+class ExchangeDirectProvider implements StockPriceProvider {
+  async latest(c: Company) { /* 取引所プロトコル */ return 0; }
+}
+
+// 依存性のルールが守られていれば、
+// EvaluateWatchList(内側)は乗り換えの前後で1文字も変わらない。
+// 違反してベンダーSDKを直接importしていたら、全ユースケースを修正する羽目に`,
+    },
+  },
+
+  "entities": {
+    title: "エンティティ",
+    what: "エンティティは同心円の最も内側に位置し、企業全体(アプリケーション横断)で通用する最重要ビジネスルールを持つ層です。「給与は0未満にできない」「約定は営業日にしか成立しない」のような、UIがWebでもCLIでも、DBが何であっても変わらないルールをオブジェクト(またはデータ構造+関数)として表現します。何にも依存しないため最も安定し、最も再利用しやすい層です。",
+    apply: {
+      text: "検証ロジックがControllerやDB層に散らばった状態から、ルールをエンティティ自身に集めます。",
+      code: `// ❌ Before: 業務ルールがあちこちに散在
+// controller.ts
+if (req.body.salary < 0) return res.status(400).send();
+// batch.ts(別の入口では検証を忘れている…)
+db.insert("employees", { salary: csvRow.salary });
+
+// ✅ After: ルールをエンティティに集約(壊れた状態を作れない)
+class Employee {
+  readonly name: string;
+  readonly salary: number;
+
+  constructor(name: string, salary: number) {
+    if (name.trim() === "") throw new Error("氏名は必須");
+    if (salary < 0) throw new Error("給与は0未満にできない");
+    this.name = name;
+    this.salary = salary;
+  }
+
+  withRaise(rate: number): Employee {
+    if (rate > 0.2) throw new Error("昇給は1回20%まで");
+    return new Employee(this.name, Math.round(this.salary * (1 + rate)));
+  }
+}
+// Webから来てもCSVバッチから来ても、Employeeを通る限りルールが守られる`,
+    },
+    benefits: "・業務ルールが1箇所に集まり、入口(Web/バッチ/CLI)ごとの検証漏れがなくなる\n・何にも依存しないため、単体テストが最も簡単で高速\n・UI・DB・フレームワークをすべて捨てても生き残る、寿命の長いコードになる\n・ドメインの用語がそのままクラス名・メソッド名になり、仕様書代わりに読める",
+    langExamples: [
+      {
+        lang: "Rust",
+        code: `// コンストラクタ関数でルールを強制し、
+// 不正な値のEmployeeを作れなくする
+pub struct Employee {
+    name: String,
+    salary: u64, // u64型自体が「負の給与」を排除している
+}
+
+impl Employee {
+    pub fn new(name: &str, salary: u64) -> Result<Self, String> {
+        if name.trim().is_empty() {
+            return Err("氏名は必須".into());
+        }
+        Ok(Self { name: name.into(), salary })
+    }
+
+    pub fn with_raise(&self, rate: f64) -> Result<Self, String> {
+        if rate > 0.2 {
+            return Err("昇給は1回20%まで".into());
+        }
+        let new_salary = (self.salary as f64 * (1.0 + rate)) as u64;
+        Employee::new(&self.name, new_salary)
+    }
+}`,
+      },
+      {
+        lang: "F#",
+        code: `// privateコンストラクタ+スマートコンストラクタで
+// 「不正なEmployeeは存在できない」を型で表現
+type Employee = private { Name: string; Salary: int64 }
+
+module Employee =
+    let create name salary =
+        if System.String.IsNullOrWhiteSpace name then
+            Error "氏名は必須"
+        elif salary < 0L then
+            Error "給与は0未満にできない"
+        else
+            Ok { Name = name; Salary = salary }
+
+    let withRaise rate employee =
+        if rate > 0.2 then Error "昇給は1回20%まで"
+        else
+            let newSalary = float employee.Salary * (1.0 + rate)
+            create employee.Name (int64 newSalary)`,
+      },
+      {
+        lang: "Kotlin",
+        code: `// initブロックでルールを強制する
+class Employee(val name: String, val salary: Long) {
+    init {
+        require(name.isNotBlank()) { "氏名は必須" }
+        require(salary >= 0) { "給与は0未満にできない" }
+    }
+
+    fun withRaise(rate: Double): Employee {
+        require(rate <= 0.2) { "昇給は1回20%まで" }
+        return Employee(name, (salary * (1 + rate)).toLong())
+    }
+}
+
+// ORMアノテーションやSpring依存をこのクラスに
+// 持ち込まないことが「内側を守る」ポイント`,
+      },
+      {
+        lang: "TypeScript",
+        code: `class Employee {
+  readonly name: string;
+  readonly salary: number;
+
+  constructor(name: string, salary: number) {
+    if (name.trim() === "") throw new Error("氏名は必須");
+    if (salary < 0) throw new Error("給与は0未満にできない");
+    this.name = name;
+    this.salary = salary;
+  }
+
+  withRaise(rate: number): Employee {
+    if (rate > 0.2) throw new Error("昇給は1回20%まで");
+    return new Employee(
+      this.name,
+      Math.round(this.salary * (1 + rate)),
+    );
+  }
+}`,
+      },
+    ],
+    domain: {
+      text: "企業(Company)エンティティに「上場企業の役員は2名以上」「従業員の雇用上限」といった業務ルールを持たせた例です。これらのルールはどんなUI・DBでも変わらない、アプリの核です。",
+      code: `class Company {
+  private employees: Employee[] = [];
+
+  constructor(
+    public readonly name: string,
+    public readonly isListed: boolean,  // 上場企業か
+  ) {}
+
+  hire(e: Employee) {
+    if (this.employees.length >= 10_000) {
+      throw new Error("雇用上限(10,000名)を超過");
+    }
+    this.employees.push(e);
+  }
+
+  // 業務ルール: 上場企業は役員が2名以上必要
+  canFileDisclosure(): boolean {
+    const executives = this.employees.filter(e => e.isExecutive);
+    return !this.isListed || executives.length >= 2;
+  }
+
+  totalPayroll(): number {
+    return this.employees.reduce((s, e) => s + e.salary, 0);
+  }
+}
+
+// このクラスはWebフレームワークもDBも知らないので、
+// テストは new Company(...) して呼ぶだけ。1ミリ秒で終わる`,
+    },
+  },
+
+  "usecases": {
+    title: "ユースケース",
+    what: "ユースケース層はエンティティの1つ外側にあり、「従業員を雇用する」「決算レポートを出力する」といったアプリケーション固有の操作手順(アプリケーションビジネスルール)を表現します。エンティティを取得し、業務ルールを実行させ、結果を保存・出力する——という指揮者の役割です。参照してよいのは内側(エンティティ)と、自層で定義した抽象(リポジトリや出力のポート)だけで、Web・DB・画面の詳細は知りません。",
+    apply: {
+      text: "「雇用する」という操作の手順をユースケースクラスに整理します。入出力はポート(抽象)経由にします。",
+      code: `// ユースケース層で定義するポート(抽象)
+interface CompanyRepository {
+  find(id: string): Promise<Company>;
+  save(company: Company): Promise<void>;
+}
+
+// ユースケース: 手順の指揮に徹する
+class HireEmployeeUseCase {
+  constructor(private companies: CompanyRepository) {}
+
+  async run(input: { companyId: string; name: string; salary: number }) {
+    // 1. エンティティを取得
+    const company = await this.companies.find(input.companyId);
+    // 2. 業務ルールはエンティティに実行させる
+    const employee = new Employee(input.name, input.salary);
+    company.hire(employee);
+    // 3. ポート経由で保存(DBの種類は知らない)
+    await this.companies.save(company);
+    return { hired: employee.name };
+  }
+}
+// HTTPのステータスコードもSQLも画面も、この層には登場しない`,
+    },
+    benefits: "・「このアプリに何ができるか」がユースケースクラスの一覧として見える化される\n・手順(ユースケース)とルール(エンティティ)が分離され、それぞれ単体でテストできる\n・同じユースケースをWeb・CLI・バッチなど複数の入口から再利用できる\n・詳細(DB・UI)の変更がユースケースに波及しない",
+    langExamples: [
+      {
+        lang: "Rust",
+        code: `pub trait CompanyRepository {
+    fn find(&self, id: &str) -> Company;
+    fn save(&self, company: &Company);
+}
+
+pub struct HireEmployee<R: CompanyRepository> {
+    companies: R,
+}
+
+impl<R: CompanyRepository> HireEmployee<R> {
+    pub fn run(&self, company_id: &str, name: &str, salary: u64) {
+        let mut company = self.companies.find(company_id);
+        let employee = Employee::new(name, salary).unwrap();
+        company.hire(employee);        // ルールはエンティティが実行
+        self.companies.save(&company); // 保存先の詳細は知らない
+    }
+}`,
+      },
+      {
+        lang: "F#",
+        code: `// 関数型スタイルでは、ユースケースは
+// 「依存(関数)を受け取って手順を実行する関数」になる
+type FindCompany = string -> Company
+type SaveCompany = Company -> unit
+
+let hireEmployee
+    (find: FindCompany)
+    (save: SaveCompany)
+    companyId name salary =
+    let company = find companyId
+    match Employee.create name salary with
+    | Ok employee ->
+        company |> Company.hire employee |> save
+        Ok employee
+    | Error e -> Error e
+
+// 部分適用で依存を注入して「実行可能なユースケース」を作る
+// let hire = hireEmployee Postgres.find Postgres.save`,
+      },
+      {
+        lang: "Kotlin",
+        code: `interface CompanyRepository {
+    fun find(id: String): Company
+    fun save(company: Company)
+}
+
+class HireEmployeeUseCase(
+    private val companies: CompanyRepository,
+) {
+    data class Input(val companyId: String, val name: String, val salary: Long)
+
+    fun run(input: Input): String {
+        val company = companies.find(input.companyId)
+        val employee = Employee(input.name, input.salary)
+        company.hire(employee)   // ルールはエンティティが実行
+        companies.save(company)  // 保存先の詳細は知らない
+        return employee.name
+    }
+}`,
+      },
+      {
+        lang: "TypeScript",
+        code: `interface CompanyRepository {
+  find(id: string): Promise<Company>;
+  save(company: Company): Promise<void>;
+}
+
+class HireEmployeeUseCase {
+  constructor(private companies: CompanyRepository) {}
+
+  async run(input: { companyId: string; name: string; salary: number }) {
+    const company = await this.companies.find(input.companyId);
+    const employee = new Employee(input.name, input.salary);
+    company.hire(employee);
+    await this.companies.save(company);
+    return { hired: employee.name };
+  }
+}`,
+      },
+    ],
+    domain: {
+      text: "経済情報アプリのユースケース一覧のイメージです。ユースケース名がそのまま「アプリの機能一覧」になり、それぞれがエンティティとポートだけで完結します。",
+      code: `// このアプリにできること = ユースケースの一覧
+class HireEmployeeUseCase { /* 企業に従業員を雇用する */ }
+class RaiseSalaryUseCase { /* 従業員を昇給させる(上限20%ルール) */ }
+class GenerateEarningsReportUseCase { /* 企業の決算レポートを出す */ }
+class ScreenCompaniesUseCase { /* 条件で企業を検索する */ }
+
+// 例: 決算レポート出力
+interface CompanyRepository { find(id: string): Promise<Company>; }
+interface ReportOutput { emit(report: EarningsReport): void; } // 出力ポート
+
+class GenerateEarningsReportUseCase {
+  constructor(
+    private companies: CompanyRepository,
+    private output: ReportOutput,   // PDFかHTMLかは知らない
+  ) {}
+
+  async run(companyId: string) {
+    const company = await this.companies.find(companyId);
+    const report = EarningsReport.from(company); // エンティティのルールで生成
+    this.output.emit(report);
+  }
+}
+
+// 同じユースケースを、Web画面からも月次バッチからも呼び出せる。
+// テストはインメモリのRepositoryと記録用Outputを渡すだけ`,
+    },
+  },
+
+  "interface-adapters": {
+    title: "インターフェースアダプター",
+    what: "インターフェースアダプター層は、ユースケースの1つ外側で「形式の変換」を担当する層です。Controller(外の入力→ユースケースの入力へ変換)、Presenter(ユースケースの出力→画面向けのViewModelへ変換)、Gateway(ユースケースのポートを実装し、エンティティ⇔DBレコードを変換)が代表です。内側の形式と外側の形式が混ざらないよう、両者の翻訳者に徹します。",
+    apply: {
+      text: "HTTPの世界とユースケースの世界を、ControllerとPresenterが翻訳する形にします。",
+      code: `// Controller: HTTP形式 → ユースケースの入力へ変換
+class HireController {
+  constructor(private useCase: HireEmployeeUseCase) {}
+
+  async handle(req: HttpRequest): Promise<HttpResponse> {
+    try {
+      const result = await this.useCase.run({
+        companyId: req.params.id,        // HTTPの都合はここで吸収
+        name: req.body.name,
+        salary: Number(req.body.salary),
+      });
+      return { status: 201, body: result };
+    } catch (e) {
+      return { status: 400, body: { error: (e as Error).message } };
+    }
+  }
+}
+
+// Gateway: ユースケースのポートを実装し、形式を変換
+class CompanyGateway implements CompanyRepository {
+  async find(id: string): Promise<Company> {
+    const row = await sql("SELECT ... WHERE id = ?", [id]);
+    return new Company(row.name, row.is_listed === 1); // レコード→エンティティ
+  }
+  async save(company: Company) { /* エンティティ→レコード */ }
+}`,
+    },
+    benefits: "・内側(ユースケース)がHTTPステータスやSQLの都合を知らずに済む\n・画面表示の変更(日付形式、通貨表示など)がPresenterの修正だけで完結する\n・DBスキーマとエンティティを独立に進化させられる(Gatewayが吸収)\n・変換ロジックが層として明示され、「どこで変換するか」に迷わない",
+    langExamples: [
+      {
+        lang: "Rust",
+        code: `// Gateway: ユースケースのポートを実装し、
+// DBレコード ⇔ エンティティを変換する
+struct EmployeeRow {
+    name: String,
+    salary_yen: i64, // DBの都合の型
+}
+
+struct EmployeeGateway;
+impl EmployeeRepository for EmployeeGateway {
+    fn save(&self, employee: &Employee) {
+        let row = EmployeeRow {
+            name: employee.name().to_string(),
+            salary_yen: employee.salary() as i64,
+        };
+        // INSERT文を発行(SQLはこの層まで)
+    }
+}`,
+      },
+      {
+        lang: "F#",
+        code: `// Presenter: ユースケースの出力を表示用に変換
+type ReportViewModel = {
+    Title: string
+    FormattedProfit: string  // "1,234百万円" のような表示形式
+}
+
+module ReportPresenter =
+    let present (report: EarningsReport) =
+        { Title = $"{report.CompanyName} 決算"
+          FormattedProfit =
+            report.Profit / 1_000_000L
+            |> fun m -> $"%s{m.ToString(\"N0\")}百万円" }
+
+// ユースケースは金額をint64で返すだけ。
+// 「百万円単位・カンマ区切り」は表示の都合なのでこの層で行う`,
+      },
+      {
+        lang: "Kotlin",
+        code: `// Controller: HTTP形式 → ユースケースの入力へ変換
+class HireController(private val useCase: HireEmployeeUseCase) {
+    fun handle(req: HttpRequest): HttpResponse =
+        try {
+            val name = useCase.run(
+                HireEmployeeUseCase.Input(
+                    companyId = req.pathParam("id"),
+                    name = req.body["name"] ?: error("nameは必須"),
+                    salary = req.body["salary"]?.toLong() ?: 0,
+                )
+            )
+            HttpResponse(201, mapOf("hired" to name))
+        } catch (e: IllegalArgumentException) {
+            HttpResponse(400, mapOf("error" to e.message))
+        }
+}
+// ユースケースはHttpRequestを一切知らない`,
+      },
+      {
+        lang: "TypeScript",
+        code: `// Presenter: ユースケースの出力 → 画面用ViewModel
+interface ReportViewModel {
+  title: string;
+  formattedProfit: string;  // "1,234百万円"
+}
+
+class ReportPresenter {
+  present(report: EarningsReport): ReportViewModel {
+    return {
+      title: report.companyName + " 決算",
+      formattedProfit:
+        (report.profit / 1_000_000).toLocaleString("ja-JP") + "百万円",
+    };
+  }
+}
+
+// ユースケースは数値を返すだけ。表示形式はこの層の責務`,
+      },
+    ],
+    domain: {
+      text: "「企業の決算サマリーを表示する」機能を通しで見た例です。HTTP→ユースケース→エンティティ→Gateway(DB)→Presenter(表示形式)と、各アダプターが変換を担当します。",
+      code: `// [Controller] GET /companies/7203/earnings
+class EarningsController {
+  constructor(private useCase: GenerateEarningsReportUseCase) {}
+  async handle(req: HttpRequest) {
+    return this.useCase.run(req.params.companyId); // HTTP→入力へ変換
+  }
+}
+
+// [Gateway] ユースケースのポートを実装(DBの形式を吸収)
+class CompanyGateway implements CompanyRepository {
+  async find(id: string): Promise<Company> {
+    const row = await sql("SELECT * FROM companies WHERE code = ?", [id]);
+    // snake_caseのレコード → エンティティへ変換
+    return new Company(row.company_name, row.is_listed === 1);
+  }
+}
+
+// [Presenter] 従業員(アナリスト)向け画面の表示形式へ変換
+class EarningsPresenter implements ReportOutput {
+  viewModel: ReportViewModel | null = null;
+  emit(report: EarningsReport) {
+    this.viewModel = {
+      title: report.companyName + " 2026年3月期",
+      formattedProfit:
+        (report.profit / 1_000_000).toLocaleString("ja-JP") + "百万円",
+      badge: report.isRecordHigh ? "過去最高益" : "",
+    };
+  }
+}
+// 表示を「億円単位」に変えたくなってもPresenterだけ直せばよい`,
+    },
+  },
+
+  "details-outside": {
+    title: "フレームワークとドライバー(詳細)",
+    what: "最外周のフレームワーク&ドライバー層には、Webフレームワーク・データベース・UI・外部APIクライアントなどの「詳細」を置きます。クリーンアーキテクチャでは「DBは詳細」「フレームワークは詳細」と考えます——ビジネスルールから見れば、それらは交換可能な道具にすぎないからです。詳細を外側に閉じ込めることで、「どのDBを使うか」といった決定を遅らせ、後からの乗り換えも可能にします。アプリの組み立て(どの実装をどのポートに注入するか)も、この最外周のmain関数が担います。",
+    apply: {
+      text: "最外周のmain(組み立てコード)で、各ポートに実装を配線します。内側のコードは組み立て方を知りません。",
+      code: `// main.ts — 最外周: 詳細を選んで配線する唯一の場所
+import express from "express";                       // 詳細
+import { PostgresCompanyRepository } from "./infra"; // 詳細
+import { HireEmployeeUseCase } from "./usecase";     // 内側
+import { HireController } from "./adapters";         // 変換係
+
+// 組み立て: ポートに実装を注入する
+const repo = new PostgresCompanyRepository("postgres://...");
+const useCase = new HireEmployeeUseCase(repo);
+const controller = new HireController(useCase);
+
+// フレームワークへの接続もここだけ
+const app = express();
+app.post("/companies/:id/hire", (req, res) =>
+  controller.handle(req).then(r => res.status(r.status).json(r.body)));
+app.listen(3000);
+
+// テスト時は同じ部品を別の組み立て方で使う:
+// new HireEmployeeUseCase(new InMemoryCompanyRepository())`,
+    },
+    benefits: "・「どのDB・どのフレームワークにするか」の決定を後回しにできる(選択肢を保てる)\n・乗り換え(Express→Fastify、MySQL→PostgreSQL)が最外周の差し替えで済む\n・組み立て場所が1箇所(main)に集まり、アプリの構成が一覧できる\n・テストでは同じ部品をインメモリ実装で組み立て直せるため、高速で安定したテストになる",
+    langExamples: [
+      {
+        lang: "Rust",
+        code: `// main.rs — 最外周で実装を選んで組み立てる
+fn main() {
+    // 詳細の選択はここに集約される
+    let repo = PostgresCompanyRepository::connect("postgres://...");
+    let use_case = HireEmployee { companies: repo };
+
+    // Webフレームワーク(axum等)への接続もここだけ
+    serve(use_case);
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn hire_works_without_db() {
+        // テストでは同じ部品をインメモリ実装で組み立てる
+        let use_case = HireEmployee {
+            companies: InMemoryRepository::new(),
+        };
+        use_case.run("acme", "佐藤", 5_000_000);
+    }
+}`,
+      },
+      {
+        lang: "F#",
+        code: `// Program.fs — 最外周(F#では最後のファイル)で組み立てる
+[<EntryPoint>]
+let main _ =
+    // 詳細の選択と配線はここだけ
+    let find = Postgres.findCompany "postgres://..."
+    let save = Postgres.saveCompany "postgres://..."
+
+    // 部分適用でユースケースを組み立てる
+    let hire = UseCase.hireEmployee find save
+
+    Web.serve hire // Webフレームワークへの接続
+    0
+
+// テストではインメモリの関数を部分適用するだけ:
+// let hire = UseCase.hireEmployee InMemory.find InMemory.save`,
+      },
+      {
+        lang: "Kotlin",
+        code: `// Main.kt — 最外周: 組み立て(Composition Root)
+fun main() {
+    // 詳細の選択はここに集約
+    val repo = PostgresCompanyRepository(url = "jdbc:postgresql://...")
+    val useCase = HireEmployeeUseCase(repo)
+    val controller = HireController(useCase)
+
+    // フレームワーク(Ktor等)への接続もここだけ
+    startServer(controller)
+}
+
+// テストでは同じ部品を差し替えて組み立てる
+class HireEmployeeUseCaseTest {
+    @Test
+    fun \`DBなしで雇用できる\`() {
+        val useCase = HireEmployeeUseCase(InMemoryCompanyRepository())
+        useCase.run(HireEmployeeUseCase.Input("acme", "佐藤", 5_000_000))
+    }
+}`,
+      },
+      {
+        lang: "TypeScript",
+        code: `// main.ts — 最外周: 組み立て(Composition Root)
+const repo = new PostgresCompanyRepository("postgres://...");
+const useCase = new HireEmployeeUseCase(repo);
+const controller = new HireController(useCase);
+
+const app = express();
+app.post("/companies/:id/hire", (req, res) =>
+  controller.handle(req).then(r => res.status(r.status).json(r.body)));
+app.listen(3000);
+
+// テストは同じ部品をインメモリで組み立て直す
+test("DBなしで雇用できる", async () => {
+  const useCase = new HireEmployeeUseCase(new InMemoryCompanyRepository());
+  const result = await useCase.run(
+    { companyId: "acme", name: "佐藤", salary: 5_000_000 });
+  expect(result.hired).toBe("佐藤");
+});`,
+      },
+    ],
+    domain: {
+      text: "経済情報アプリの「詳細」が差し替わっていく現実的なシナリオです。ビジネスルール(企業・従業員・ユースケース)は無傷のまま、外側だけが入れ替わります。",
+      code: `// ---- リリース時の構成 ----
+const app = buildApp({
+  companyRepo: new PostgresCompanyRepository(),  // DB: PostgreSQL
+  priceProvider: new VendorApiProvider(),        // 株価: ベンダーAPI
+  notifier: new EmailNotifier(),                 // 通知: メール
+});
+
+// ---- 1年後: 事情が変わっても組み立ての差し替えだけ ----
+const app2 = buildApp({
+  companyRepo: new DynamoCompanyRepository(),    // コスト削減でDynamoへ
+  priceProvider: new ExchangeDirectProvider(),   // 取引所直結に乗り換え
+  notifier: new SlackNotifier(),                 // 通知はSlackに変更
+});
+
+// ---- テスト・デモ環境 ----
+const demoApp = buildApp({
+  companyRepo: new InMemoryCompanyRepository([acme, globex]),
+  priceProvider: new FixturePriceProvider(1000), // 固定値
+  notifier: new NoopNotifier(),
+});
+
+// Company・Employee・各ユースケースのコードは
+// 3つの構成すべてで同一。これが「詳細を外に追いやる」効果`,
+    },
+  },
+
+  // ===================================================
+  // バイブコーディング
+  // ===================================================
+  "vibe-coding-overview": {
+    title: "バイブコーディング(全体像)",
+    what: "バイブコーディング(Vibe Coding)は、自然言語でAIに指示してコードを生成させ、細部の実装よりも「動く結果」を確かめながら素早く作り進める開発スタイルです。2025年にAndrej Karpathyが「コードの存在すら忘れて雰囲気(vibe)に身を任せる」と表現したことから広まりました。プロトタイプ・個人ツール・使い捨てスクリプトのように「まず形にして試したい」場面で特に威力を発揮します。一方、細部を見ないぶん検証と品質管理の考え方がセットで必要になります。",
+    apply: {
+      text: "従来の「自分で全部書く」開発と、バイブコーディングの進め方を比べると、人間の仕事が「書く」から「伝える・確かめる」に変わります。",
+      code: `── 従来の開発 ─────────────────────
+1. 仕様を考える
+2. コードを自分で書く(数時間〜数日)
+3. デバッグして完成させる
+
+── バイブコーディング ─────────────
+1. 作りたいものを言葉で伝える
+   「企業名を入力すると株価チャートを表示する
+    Webページを作って。HTMLファイル1枚で完結、
+    ライブラリはChart.jsを使って」
+2. 生成されたコードを実行して動作を見る(数分)
+3. 気になる点を言葉でフィードバック
+   「チャートの下に直近5日の終値も表で出して」
+4. 動いたら取り込む前に検証する
+   (重要な部分は読む・テストする)
+
+人間の役割: 書く人 → 方向を決めて検証する人`,
+    },
+    benefits: "・アイデアを数分〜数時間で動く形にでき、試行錯誤の回数が桁違いに増える\n・ボイラープレートや慣れない言語・ライブラリの学習コストをスキップできる\n・「まず動くものを見て考える」ことで、要件の勘違いに早く気づける\n・注意: 速さの代償として検証責任は残る。重要システムへの「雰囲気のまま投入」は禁物",
+    langExamples: [
+      {
+        lang: "Rust",
+        code: `── RustをAIに書かせるときのポイント ──
+
+プロンプト例:
+「CSVファイルから企業名と売上を読み込んで、
+ 売上順にソートして表示するCLIツールをRustで。
+ エラー処理はanyhowクレートでシンプルに」
+
+注意点:
+・所有権・借用のコンパイルエラーが出たら、
+  エラーメッセージをそのまま貼ると効果的
+  (Rustコンパイラのエラーは情報量が多くAIと相性が良い)
+・「unwrap()を使わずResultで処理して」と
+  指定すると本番寄りの品質になる
+・Cargo.tomlの依存もセットで生成してもらう`,
+      },
+      {
+        lang: "F#",
+        code: `── F#をAIに書かせるときのポイント ──
+
+プロンプト例:
+「企業の四半期売上のリストから移動平均を計算する
+ F#の関数を。判別共用体とパターンマッチを活用して、
+ .fsxスクリプトとして実行できる形で」
+
+注意点:
+・F#は学習データが比較的少なく、C#風の
+  コードが混ざることがある。「F#らしく
+  パイプライン演算子と不変データで」と念押しする
+・dotnet fsi で動く.fsxから始めると
+  実行→フィードバックのループが速い`,
+      },
+      {
+        lang: "Kotlin",
+        code: `── KotlinをAIに書かせるときのポイント ──
+
+プロンプト例:
+「従業員リスト(名前・部署・給与)を部署ごとに
+ 集計して平均給与を出すKotlinのコードを。
+ data classとコレクション操作(groupBy等)を使って」
+
+注意点:
+・Java風の冗長なコードが出たら「Kotlinらしく
+  簡潔に」と指示すると改善される
+・null安全(?. や ?:)の扱い方針を伝えると
+  実運用に近いコードになる
+・Gradleの設定が絡むエラーはバージョン情報を
+  添えて質問すると精度が上がる`,
+      },
+      {
+        lang: "TypeScript",
+        code: `── TypeScriptをAIに書かせるときのポイント ──
+
+プロンプト例:
+「企業の株価データ(日付と終値の配列)から
+ 前日比変化率を計算するTypeScriptの関数を。
+ 型定義を明示して、any型は使わないで」
+
+注意点:
+・「strictモードで型エラーが出ない形で」と
+  伝えるとany頼みのコードを防げる
+・学習データが最も豊富な言語の1つで、
+  生成品質は安定しやすい
+・ライブラリのバージョン差(v4とv5でAPIが違う等)
+  によるハルシネーションには注意`,
+      },
+    ],
+    domain: {
+      text: "経済情報アプリをバイブコーディングで立ち上げるときの、最初のプロンプトの例です。目的・データ・画面・技術の4点を伝えるだけで、たたき台が数分で手に入ります。",
+      code: `── 最初のプロンプト ─────────────────
+
+「企業情報ダッシュボードのプロトタイプを作って。
+
+ 目的: 営業チームが訪問前に企業概要を3分で把握する
+ データ: 企業(名前・業種・時価総額・従業員数)を
+        10社ぶんダミーデータで用意して
+ 画面: 企業一覧(カード形式)→タップで詳細
+       詳細には従業員数の推移グラフ(ダミー)も
+ 技術: HTML/CSS/JSのファイル1枚。スマホ優先。
+       外部ライブラリはChart.jsのみ」
+
+── 5分後 ──────────────────────────
+動くプロトタイプが手に入る。触ってみて
+「業種で絞り込みたい」「時価総額は億円表示がいい」
+と気づいたことを次のプロンプトで伝えて改善していく。
+
+従来なら企画書とモックで1週間かけていた
+「方向性の確認」が、動くもので即日できる`,
+    },
+  },
+
+  "prompting": {
+    title: "効果的な指示(プロンプト)",
+    what: "AIへの指示の質が、生成されるコードの質を直接決めます。基本は3点セット——①目的(何のために作るか)、②入出力の例(どう動けばよいか)、③制約(言語・ライブラリ・エラー処理などの方針)。AIは書かれていないことを推測で埋めるため、曖昧な指示は「もっともらしいが期待と違うもの」を生みます。また、既存コードやエラーメッセージなどの「事実」を共有するほど、回答は的確になります。",
+    apply: {
+      text: "曖昧なプロンプトを、目的・例・制約つきに書き直した例です。手戻りの回数が大きく変わります。",
+      code: `── ❌ 曖昧な指示 ──────────────────
+「企業データを処理する関数を作って」
+
+→ 何のデータ? どう処理? 出力は?
+  AIが全部推測で埋めるので、期待とズレやすい
+
+── ✅ 目的・例・制約を伝える ────────
+「企業の決算データから増収増益の企業だけを
+ 抽出する関数をTypeScriptで作って。
+
+ 入力の例:
+   [{ name: "アクメ", revenue: [100, 120],
+      profit: [10, 15] }, ...]
+   (配列は古い年度→新しい年度の順)
+
+ 出力の例: 増収かつ増益の企業名の配列
+   ["アクメ"]
+
+ 制約:
+ ・データが1年分しかない企業は除外
+ ・型定義を明示、anyは使わない
+ ・純粋関数にして(引数を変更しない)」`,
+    },
+    benefits: "・期待とのズレが減り、書き直しの往復回数が少なくなる\n・入出力例がそのままテストケースの種になる\n・制約を伝えることで、プロジェクトの方針(型安全、エラー処理)に合ったコードになる\n・「目的」を伝えると、AIがより適切な設計や代替案を提案してくれることがある",
+    langExamples: [
+      {
+        lang: "Rust",
+        code: `── Rust向けプロンプトの工夫 ──
+
+「企業の株価履歴を保持する構造体と、
+ 期間内の最大ドローダウンを計算するメソッドをRustで。
+
+ 制約:
+ ・panicせずResult<f64, String>を返す
+ ・f64の比較はpartial_cmpを正しく処理
+ ・#[cfg(test)]のユニットテストも付けて」
+
+ポイント: Rustはエラー処理の方針
+(panic / Result / anyhow)を指定しないと
+スタイルがぶれやすい。テストを同時に
+頼むと動作確認もセットで済む`,
+      },
+      {
+        lang: "F#",
+        code: `── F#向けプロンプトの工夫 ──
+
+「従業員の給与改定を表すF#の関数を。
+
+ 制約:
+ ・Employee型はレコードで不変に
+ ・昇給率が0〜20%の範囲外ならErrorを返す
+   (Result<Employee, string>)
+ ・if式でなくパターンマッチを優先
+ ・関数合成しやすいようカリー化された引数順で」
+
+ポイント: F#は「不変データ+Result型」の
+方針を明示すると、例外throwに頼らない
+関数型らしいコードが安定して出てくる`,
+      },
+      {
+        lang: "Kotlin",
+        code: `── Kotlin向けプロンプトの工夫 ──
+
+「企業リストを条件で絞り込むKotlinの関数を。
+
+ 制約:
+ ・data class Company(名前・業種・時価総額)
+ ・引数はフィルタ条件のラムダ (Company) -> Boolean
+ ・戻り値はList<Company>、元のリストは変更しない
+ ・拡張関数として実装して」
+
+ポイント: Kotlinはコレクション操作の
+書き方が豊富なので、「拡張関数で」
+「シーケンスで遅延評価」など形まで
+指定すると好みのスタイルに寄せられる`,
+      },
+      {
+        lang: "TypeScript",
+        code: `── TypeScript向けプロンプトの工夫 ──
+
+「株価APIのレスポンスを画面表示用に変換する
+ TypeScriptの関数を。
+
+ 入力の型: { symbol: string; last_px: number;
+            ts_epoch: number }
+ 出力の型: { code: string; price: string;  // "1,234円"
+            updatedAt: string }            // "2026/07/13"
+ 制約:
+ ・型定義をinterfaceで明示
+ ・変換ロジックは純粋関数に
+ ・Intl.NumberFormatで通貨表示」
+
+ポイント: 入出力の「型」をそのまま
+書いて渡せるのがTSの強み。型が仕様書になる`,
+      },
+    ],
+    domain: {
+      text: "経済情報アプリの機能追加を依頼するときの、コンテキスト(既存の前提)の渡し方の例です。既存の型定義を貼るだけで、プロジェクトに馴染むコードが返ってきます。",
+      code: `── コンテキストを渡すプロンプト ──────
+
+「以下の既存の型定義があるプロジェクトです。
+
+ interface Company {
+   code: string;        // 証券コード
+   name: string;
+   employees: Employee[];
+ }
+ interface Employee {
+   name: string;
+   department: string;
+   salary: number;
+ }
+
+ この型を使って、『部署ごとの平均給与が
+ 全社平均を上回っている部署』を企業ごとに
+ 一覧するレポート関数を追加してください。
+
+ ・既存の型は変更しない
+ ・戻り値の型も定義して
+ ・端数は四捨五入で円単位」
+
+── ポイント ────────────────────────
+既存の型・命名規則・コード片を見せると、
+AIはプロジェクトの流儀に合わせてくる。
+「何も見せずに頼む」と汎用的な別物が返ってくる`,
+    },
+  },
+
+  "iteration": {
+    title: "小さく反復する",
+    what: "バイブコーディングの基本リズムは「小さく頼む → 実行して確かめる → 結果をフィードバックする」の高速な反復です。大きな機能を一度に生成させるほど誤りの混入率と発見の難しさが上がるため、1ステップずつ動作確認しながら進めます。エラーが出たらメッセージをそのまま貼って修正を依頼するのが基本動作です。また、AIは大胆な書き換えをすることがあるため、動く状態をこまめにコミットしておく(すぐ巻き戻せる)ことが安心して任せるためのセーフティネットになります。",
+    apply: {
+      text: "「全部一気に」ではなく「1ステップずつ動作確認」で進める実際の流れです。",
+      code: `── ❌ 一気に頼む ────────────────────
+「企業検索、詳細表示、株価チャート、
+ ウォッチリスト、通知機能を全部作って」
+→ 500行のコードが来て、どこかが動かない。
+  どこが悪いのか、人間にもAIにも分かりにくい
+
+── ✅ 小さく反復する ────────────────
+1.「まず企業一覧を表示するだけのページを」
+   → 実行 → 動いた → commit
+2.「一覧に検索ボックスを追加して」
+   → 実行 → 動いた → commit
+3.「企業をタップしたら詳細を表示して」
+   → 実行 → エラー発生!
+4. エラーメッセージをそのまま貼る:
+   「TypeError: Cannot read properties of
+    undefined (reading 'code') が出た」
+   → 修正案 → 実行 → 動いた → commit
+5. 次の機能へ…
+
+壊れたら直前のcommitに戻して別の頼み方を試す`,
+    },
+    benefits: "・エラーの原因箇所が「直前の1ステップ」に絞られ、デバッグが速い\n・動く状態が常に手元にあり、いつでも巻き戻せる安心感がある\n・途中で方向修正できる(全部できてから「違う」と気づくのを防ぐ)\n・フィードバックが具体的になり、AIの修正精度も上がる",
+    langExamples: [
+      {
+        lang: "Rust",
+        code: `── Rustでの反復のコツ ──
+
+Rustはコンパイラが最強のフィードバック源。
+
+1. AIにコードを生成させる
+2. cargo check(高速な型チェック)
+3. エラーが出たら全文をそのまま貼る:
+   「error[E0502]: cannot borrow \`companies\`
+    as mutable because it is also borrowed
+    as immutable ... というエラーが出た」
+4. Rustコンパイラのエラーは原因と修正候補
+   まで書いてあるので、AIの修正精度が高い
+
+cargo check → cargo test → cargo run の
+順に確認すると、反復1周が速くて確実`,
+      },
+      {
+        lang: "F#",
+        code: `── F#での反復のコツ ──
+
+F#はREPL(dotnet fsi)が反復と相性抜群。
+
+1. AIに関数を1つ生成させる
+2. .fsxファイルに貼ってdotnet fsiで即実行
+3. 結果が期待と違えば、実際の出力を貼る:
+   「calcMovingAverage [100.; 120.; 90.] 2 の
+    結果が [110.0; 105.0] になったけど、
+    先頭の要素は平均が取れないので
+    除外してほしい」
+4. 型エラーはコンパイラの指摘をそのまま共有
+
+小さな関数単位で確かめてから
+組み合わせると、堅牢に積み上がる`,
+      },
+      {
+        lang: "Kotlin",
+        code: `── Kotlinでの反復のコツ ──
+
+1. AIにコードを生成させる
+2. IDEの赤線(コンパイルエラー)があれば
+   その内容を貼って修正依頼
+3. 実行時エラーはスタックトレースの
+   先頭数行をそのまま貼る:
+   「kotlin.KotlinNullPointerException
+    at CompanyReport.kt:42 で落ちた」
+4. 動いたらテストも生成させる:
+   「今の関数のエッジケースを網羅する
+    JUnit5のテストを書いて」
+
+Kotlin Playgroundやスクラッチファイルで
+小さく試してから本体に取り込むと安全`,
+      },
+      {
+        lang: "TypeScript",
+        code: `── TypeScriptでの反復のコツ ──
+
+1. AIにコードを生成させる
+2. tsc --noEmit で型チェック
+   エラーはそのまま貼って修正依頼:
+   「TS2345: Argument of type 'string' is
+    not assignable to parameter of type
+    'number' が42行目に出た」
+3. ブラウザで動かす場合はDevToolsの
+   Consoleのエラーをコピペで共有
+4. console.logの実際の出力を貼って
+   「期待は○○、実際は××」と伝えると
+   ピンポイントで直ってくる
+
+npm run dev の自動リロードと組み合わせると
+1周数十秒の高速ループになる`,
+      },
+    ],
+    domain: {
+      text: "経済情報ダッシュボードに「従業員数の推移グラフ」を追加する反復の実録イメージです。1ステップずつ確かめることで、ズレを早期に修正できています。",
+      code: `1.「企業詳細に従業員数の推移グラフを追加して。
+    データは {year: 2022, count: 1200} の配列で」
+   → 表示された。が、縦軸が0始まりでなく
+     変化が誇張されて見える
+
+2.「縦軸を0始まりにして。あと単位『名』を付けて」
+   → 直った → commit
+
+3.「前年比の増減率もツールチップに出して」
+   → エラー: Cannot read properties of
+     undefined (reading 'count')
+   → エラーをそのまま貼る
+   →「最初の年は前年がないので、
+      ガードを追加しました」→ 動いた → commit
+
+4.「役員(isExecutive)だけの推移も
+    切り替えで見られるようにして」
+   → 動いた → commit → 完成
+
+計4回の反復・所要20分。各ステップが小さいので
+どこで壊れてもすぐ原因が特定できた`,
+    },
+  },
+
+  "review-verification": {
+    title: "生成コードの検証",
+    what: "AIの出力は「もっともらしいが間違っている」ことがあります(ハルシネーション)。存在しないAPI、古いライブラリの使い方、微妙に誤ったロジックなどが、自信満々の文面で返ってきます。だからこそ、取り込む前の検証——実際に動かす・テストを通す・重要な部分は読んで理解する——が不可欠です。そして、生成コードで障害が起きたときに責任を負うのはAIではなく、取り込みを判断した人間です。「AIが書いたから」は言い訳になりません。",
+    apply: {
+      text: "生成コードを取り込む前のチェックの流れを、軽量なものから順に習慣化します。",
+      code: `── 生成コードを取り込む前のチェックリスト ──
+
+レベル1: 動かして確かめる(必須・数秒)
+  □ 実行してエラーが出ないか
+  □ 代表的な入力で期待どおりの出力か
+  □ 変な入力(空、0、マイナス)でどうなるか
+
+レベル2: 読んで理解する(重要な箇所は必須)
+  □ 何をしているか自分の言葉で説明できるか
+  □ 使われているAPI・ライブラリは実在するか
+  □ 「なぜこう書いたの?」とAIに説明させるのも有効
+
+レベル3: テストで固定する(残すコードには推奨)
+  □ 入出力例をテストコードにする
+    (AIに「このコードのテストを書いて」でOK)
+  □ エッジケースのテストも依頼する
+
+判断基準: 使い捨てスクリプトはレベル1でも可。
+本番に入るコード・お金や個人情報を扱うコードは
+レベル3+人間のレビューまで必須`,
+    },
+    benefits: "・「もっともらしい誤り」を本番に入れる前に捕まえられる\n・読んで理解する習慣により、障害時に自分で調査・修正できる状態を保てる\n・テスト化しておけば、後のAIの変更による退行もすぐ検知できる\n・「重要度に応じて検証の深さを変える」判断ができ、速度と品質を両立できる",
+    langExamples: [
+      {
+        lang: "Rust",
+        code: `── Rustでの検証のコツ ──
+
+強力な型システムが検証の第一関門になる。
+
+・cargo check が通る = 型・所有権レベルの
+  整合性はコンパイラが保証済み
+・ただし「コンパイルが通る=正しい」ではない。
+  ロジックの誤りは型では捕まらない
+・AIに頼むテストの例:
+  「この関数のプロパティベーステストを
+   proptestクレートで書いて。
+   『ソート結果は常に昇順』を検証したい」
+・unsafeブロックが生成されたら要注意。
+  本当に必要か必ず人間が判断する`,
+      },
+      {
+        lang: "F#",
+        code: `── F#での検証のコツ ──
+
+・まずREPL(dotnet fsi)で関数単位に実行し、
+  入出力を目で確かめる
+・型シグネチャを見るだけでも検証になる:
+  「この関数、Employee -> Employee のはずが
+   Employee -> unit になってる = 破壊的変更?」
+・AIに頼むテストの例:
+  「この関数のテストをFsCheckで。
+   『昇給後の給与は必ず元以上』という
+   性質を検証して」
+・判別共用体の網羅チェック(warning)を
+  無視していないかも確認ポイント`,
+      },
+      {
+        lang: "Kotlin",
+        code: `── Kotlinでの検証のコツ ──
+
+・!!(強制アンラップ)が生成コードに
+  混ざっていたら要注意。nullの扱いを
+  ちゃんと考えたか確認する
+・runCatchingで例外を握りつぶす形に
+  なっていないかチェック
+・AIに頼むテストの例:
+  「このクラスのJUnit5テストを書いて。
+   境界値(0円、上限ちょうど、上限+1円)を
+   網羅して」
+・非推奨API(Deprecated)の使用は
+  IDEの警告で機械的に発見できる`,
+      },
+      {
+        lang: "TypeScript",
+        code: `── TypeScriptでの検証のコツ ──
+
+・any / as / @ts-ignore が生成コードに
+  混ざっていたら型検査が素通しになるサイン。
+  「anyを使わずに書き直して」と依頼する
+・tsc --noEmit + ESLintを通すのを習慣に
+・AIに頼むテストの例:
+  「この関数のVitestテストを書いて。
+   正常系2つ、異常系(空配列・不正な日付)も」
+・実在しないnpmパッケージをimportして
+  いないか、インストール前にnpmjs.comで確認`,
+      },
+    ],
+    domain: {
+      text: "「企業の時価総額ランキング」機能の生成コードに潜んでいた、実際にありがちな「もっともらしい誤り」の例です。動かすだけでは気づきにくく、読む・テストすることで捕まえられます。",
+      code: `// AIが生成した一見正しいコード
+function topCompanies(companies: Company[], n: number) {
+  return companies
+    .sort((a, b) => b.marketCap - a.marketCap)  // 誤り1
+    .slice(0, n);
+}
+
+// 誤り1: sortは元の配列を破壊する(引数を変更してしまう)
+//   → 他の画面で使っている一覧の順番まで変わるバグに
+//   → [...companies].sort(...) が正しい
+
+// 誤り2(別の生成例): 前年比計算で
+//   (current - previous) / current      // 分母が逆
+//   → 数字はそれっぽく出るので動作確認だけでは
+//     気づきにくい。入出力例のテストで捕まえる
+
+// 検証の実践:
+// 1. 「この関数は引数を変更しない?」とAIに確認
+// 2. 計算式は例で検証:
+//    「時価総額100→120の企業の成長率は20%になる?」
+// 3. テスト化:
+//    expect(growthRate(100, 120)).toBeCloseTo(0.2)
+// お金の数字を扱う機能は「それっぽく動く」が
+// 一番危ない。例による検証を習慣にする`,
+    },
+  },
+
+  "security-quality": {
+    title: "セキュリティと品質のリスク",
+    what: "バイブコーディングには特有のリスクがあります。①秘密情報の漏洩——プロンプトに貼った内容は外部サービスに送信され、AIはAPIキーをコードにハードコードしがち。②実在しないパッケージ——AIが創作したパッケージ名を攻撃者が悪用する「スロップスクワッティング」も報告されています。③脆弱性の混入——SQLインジェクションやXSSなどは「動く」だけでは検出されません。「動く」と「安全」は別物である、という意識が最大の防御です。",
+    apply: {
+      text: "秘密情報・依存パッケージ・脆弱性の3大リスクへの基本対策です。",
+      code: `── リスク1: 秘密情報の漏洩 ──────────
+❌ 「このAPIキー sk-abc123... を使って
+    株価取得のコードを書いて」
+✅ 「APIキーは環境変数 STOCK_API_KEY から
+    読む形でコードを書いて」
+→ プロンプトにもコードにも秘密を書かない。
+  .envファイル+.gitignoreを最初に整備
+
+── リスク2: 実在しないパッケージ ──────
+AIの提案: 「stock-price-fetcher-proという
+便利なライブラリがあります」
+→ インストール前に確認:
+  ・レジストリ(npm/crates.io等)に実在するか
+  ・作者は誰か、更新されているか、利用実績は
+→ 攻撃者がAIの創作しがちな名前で悪意ある
+  パッケージを公開する攻撃が実在する
+
+── リスク3: 脆弱性の混入 ────────────
+生成コード:
+  db.query("SELECT * FROM companies
+    WHERE name = '" + userInput + "'")
+→ SQLインジェクション。動作確認では気づけない
+→ 公開前に「このコードのセキュリティ上の
+  問題を指摘して」とAI自身に点検させるのも有効`,
+    },
+    benefits: "・(対策することで)秘密情報の流出という取り返しのつかない事故を防げる\n・サプライチェーン攻撃(悪意あるパッケージ)の入口を塞げる\n・「動く」と「安全」を区別する習慣が、公開してよいものの判断基準になる\n・AI自身にセキュリティ点検させる方法を知っていれば、低コストで一定の防御ができる",
+    langExamples: [
+      {
+        lang: "Rust",
+        code: `── Rustでの注意点 ──
+
+・依存の確認: crates.ioで実在・作者・
+  ダウンロード数を見る。cargo auditで
+  既知の脆弱性もチェックできる
+・秘密情報:
+  「dotenvyクレートで環境変数から
+   APIキーを読む形にして」と指示
+・unsafe: 生成コードにunsafeが混ざったら
+  「unsafeなしで書けない?」とまず聞く
+・整数オーバーフロー: 金額計算は
+  checked_add / checked_mul を指定すると
+  静かな桁あふれを防げる`,
+      },
+      {
+        lang: "F#",
+        code: `── F#/.NETでの注意点 ──
+
+・依存の確認: NuGetで実在と作者を確認。
+  dotnet list package --vulnerable で
+  既知の脆弱性を検査できる
+・秘密情報: appsettingsに直書きさせず
+  「環境変数またはUser Secretsから
+   読む形にして」と指示
+・SQL: 「Dapperのパラメータ化クエリで」
+  など、文字列連結でないことを明示
+・型で防ぐ: 「金額はdecimalで」と指定
+  (floatの誤差はお金の計算で事故のもと)`,
+      },
+      {
+        lang: "Kotlin",
+        code: `── Kotlin/JVMでの注意点 ──
+
+・依存の確認: Maven Centralで実在を確認。
+  OWASP Dependency-Checkで脆弱性検査
+・秘密情報: 「APIキーはSystem.getenvから。
+  ソースにハードコードしないで」と指示
+・SQL: 「PreparedStatementまたは
+  Exposedのパラメータバインドで」と明示
+・Androidの場合はローカルに保存する
+  トークンの暗号化(EncryptedSharedPreferences)
+  まで指定するとより安全`,
+      },
+      {
+        lang: "TypeScript",
+        code: `── TypeScript/Node.jsでの注意点 ──
+
+・依存の確認: npmjs.comで実在・作者・
+  週間DL数を確認。npm auditも実行
+  (タイポスクワッティングの標的が最も多い
+   エコシステムなので特に慎重に)
+・秘密情報: 「process.env.API_KEYから読んで、
+  .env.exampleも作って」と指示。
+  フロントエンドのコードにキーを置かない
+・XSS: 「innerHTMLでなくtextContentで」
+  「ユーザー入力はエスケープして」と明示
+・SQL: 「プレースホルダ($1)を使って」と指定`,
+      },
+    ],
+    domain: {
+      text: "経済情報アプリは「お金の数字」「企業の非公開情報」「従業員の個人情報」を扱うため、リスク管理の重要度が高い領域です。ドメイン特有の注意点をまとめます。",
+      code: `── 経済情報アプリ特有のリスクと対策 ──
+
+1. 株価データAPIのキー
+   ❌ フロントエンドのJSに埋め込む
+     (誰でもDevToolsで抜き取れて、従量課金を悪用される)
+   ✅ 「APIキーはサーバー側だけで使い、
+      フロントには自前のエンドポイント経由で」と指示
+
+2. 従業員データ(個人情報)
+   ❌ 実データをプロンプトに貼って
+     「このデータで動作確認して」
+   ✅ 「ダミーデータを生成して確認して」と依頼。
+      実名・実給与は外部サービスに送らない
+
+3. 金額計算の品質
+   ・浮動小数点の誤差: 0.1 + 0.2 !== 0.3
+   ・「金額は整数の『銭』単位で計算して」等の
+     方針を最初に指定する
+   ・時価総額の集計は桁あふれにも注意(BigInt)
+
+4. 非公開の決算情報を扱う場合
+   ・組織のAI利用ポリシー(送信してよい情報の
+     範囲)を先に確認するのが大前提`,
+    },
+  },
+
+  "ai-collaboration": {
+    title: "人間とAIの役割分担",
+    what: "バイブコーディングは「全部AIに丸投げ」ではなく、得意分野で分担する協働です。AIが得意なのは、定型的な実装・ボイラープレート・慣れないライブラリの使い方・変換やテストの作成など「パターンが存在する仕事」。人間が担うべきは、要件定義(何を作るべきか)・設計判断(どんな方針にするか)・品質の最終判断(この状態でリリースしてよいか)です。自動テストを整備しておくと、AIの変更による退行を即検知でき、安心して任せられる範囲が広がります。",
+    apply: {
+      text: "1つの機能開発を、人間の仕事とAIの仕事に分けた例です。判断は人間、パターン作業はAIという分担が基本形です。",
+      code: `── 機能: 「企業ウォッチリストに通知機能を追加」──
+
+[人間] 要件を決める
+  「目標株価に到達したら通知。ただし同じ企業への
+   通知は1日1回まで(通知疲れを防ぐ)」
+   ← ビジネス判断はAIには決められない
+
+[人間] 設計方針を決める
+  「通知はNotifierインターフェースにして
+   将来Slack対応できるようにしよう」
+   ← アーキテクチャの意思決定
+
+[AI] 実装する
+  「上の方針でTypeScriptのコードを書いて」
+  → インターフェース、実装、重複排除ロジック
+
+[AI] テストを書く
+  「『1日1回まで』のルールのテストを書いて。
+   日付をまたぐケースも」
+
+[人間] 検証して取り込みを判断する
+  ・テストが通るか、ルールの解釈は正しいか
+  ・「23:59と0:01は別の日?同じ24時間以内?」
+   ← 仕様の曖昧さに気づくのも人間の仕事
+
+[人間] リリース判断`,
+    },
+    benefits: "・パターン作業をAIに任せることで、人間は要件・設計という高付加価値な仕事に集中できる\n・「AIに説明できる程度に要件を言語化する」こと自体が、仕様の曖昧さの発見につながる\n・テストという安全網があると、AIに任せられる範囲を段階的に広げられる\n・スキルの学習にも有効: AIの出力を読み、「なぜ?」と聞くことで新しい言語・技術を実地で学べる",
+    langExamples: [
+      {
+        lang: "Rust",
+        code: `── Rustでの分担例 ──
+
+[人間] 「並行処理でデータ競合が怖いので、
+       まず設計方針を相談したい」
+[AI]  選択肢を提示(Mutex / channel /
+      actorモデル)と、それぞれの
+      トレードオフを説明
+[人間] 「チャネルベースでいこう」と決定
+[AI]  実装+テストを生成
+[人間] cargo test を確認して取り込み
+
+Rustは学習曲線が急な言語だからこそ、
+「AIに説明させながら書かせる」ことが
+そのまま言語の学習になる`,
+      },
+      {
+        lang: "F#",
+        code: `── F#での分担例 ──
+
+[人間] 「決算データのバリデーションを
+       Railway Oriented Programming
+       (Result連鎖)で組みたい」と方針決定
+[AI]  bind/mapを使ったパイプラインを実装
+[人間] 型シグネチャを見て設計意図どおりか確認
+[AI]  FsCheckのプロパティテストを追加
+[人間] 「この性質で仕様を表せてる?」を判断
+
+型シグネチャが設計の共通言語になるのが
+F#での協働のやりやすさ。人間は型を見て
+方向性を判断し、中身の実装はAIに任せる`,
+      },
+      {
+        lang: "Kotlin",
+        code: `── Kotlinでの分担例 ──
+
+[人間] 「AndroidアプリにDBキャッシュ層を
+       足したい。RoomとSQLDelightどっちがいい?」
+[AI]  比較(マルチプラットフォーム対応、
+      型安全性、学習コスト)を提示
+[人間] 「KMP予定はないのでRoomで」と決定
+[AI]  Entity/DAO/Migrationを一式生成
+[人間] スキーマ設計だけ重点レビュー
+      (後から変えにくい部分に人間の目を使う)
+[AI]  DAOのテストを生成
+
+「後から変えにくいもの(スキーマ、公開API)は
+人間が厚くレビュー」が投資効率の良い分担`,
+      },
+      {
+        lang: "TypeScript",
+        code: `── TypeScriptでの分担例 ──
+
+[人間] 「フォームのバリデーションが複雑化
+       してきた。zodを導入すべき?」
+[AI]  現状コードとzod版の比較を提示
+[人間] 導入を決定、既存コードの移行を依頼
+[AI]  スキーマ定義と移行コードを生成
+[人間] 「型がスキーマから推論される形に
+       なってる?」と設計意図を確認
+[AI]  エッジケースのテストを追加
+
+型定義(interface/zodスキーマ)を人間が
+レビューの中心に据えると、実装の細部は
+安心して任せられる`,
+      },
+    ],
+    domain: {
+      text: "経済情報アプリの開発チームでの、現実的な分担の全体像です。ドメイン知識(金融・業務ルール)が絡む判断ほど人間の役割が大きくなります。",
+      code: `── 経済情報アプリ開発での役割分担 ──
+
+[人間だけができること]
+・「移動平均は5日と25日、どちらを見せるべきか」
+  → 利用者(アナリスト従業員)の業務理解が必要
+・「この企業データの利用は契約の範囲内か」
+  → データライセンスの判断
+・「決算発表の15時に通知が集中しても大丈夫か」
+  → 運用・負荷の想定はドメイン経験がモノを言う
+
+[AIに任せて効率化できること]
+・チャート描画・テーブル表示などのUI実装
+・APIレスポンスの型定義と変換関数
+・テストデータ(ダミー企業・従業員)の生成
+・「この計算式(PER、配当利回り)の実装」
+  ※ ただし式の正しさの確認は人間
+
+[協働が最も活きること]
+・「出来高加重平均価格(VWAP)を実装して」
+  → AIが実装、人間が金融知識で検算
+・障害調査 → ログをAIに貼って仮説を出させ、
+  人間がドメイン知識で絞り込む
+
+判断と検算は人間、パターンと物量はAI`,
     },
   },
 };
