@@ -72,6 +72,27 @@ const QUIZ_CONCEPT_GROUPS = {
       },
     ],
   },
+  "clean-architecture": {
+    intro:
+      "クリーンアーキテクチャは、ビジネスルールをフレームワーク・DB・UIなどの「詳細」から独立させるためのアーキテクチャ指針です。同心円のレイヤー構成と、たった1つの絶対ルール「依存は内側へ」を軸に理解していきます。SOLID原則(特にDIP)が土台になっています。",
+    groups: [
+      {
+        name: "全体像とルール",
+        description: "同心円の構成と、唯一の絶対ルール",
+        concepts: ["clean-arch-overview", "dependency-rule"],
+      },
+      {
+        name: "内側のレイヤー",
+        description: "アーキテクチャの主役となるビジネスルールの層",
+        concepts: ["entities", "usecases"],
+      },
+      {
+        name: "外側のレイヤー",
+        description: "変換係と、交換可能な「詳細」",
+        concepts: ["interface-adapters", "details-outside"],
+      },
+    ],
+  },
 };
 
 const QUIZ_CONCEPTS = {
@@ -3764,6 +3785,902 @@ function buildDashboard(factory: MarketFactory, company: Company) {
   const price = factory.createPriceProvider().latest(company.code);
   return factory.createFormatter().format(price);
 }`,
+    },
+  },
+
+  // ===================================================
+  // クリーンアーキテクチャ
+  // ===================================================
+  "clean-arch-overview": {
+    title: "クリーンアーキテクチャ(全体像)",
+    what: "クリーンアーキテクチャは、Robert C. Martinが提唱した、ビジネスルールをフレームワーク・DB・UIなどの「詳細」から独立させるアーキテクチャ指針です。同心円で表され、内側から エンティティ → ユースケース → インターフェースアダプター → フレームワーク&ドライバー の4層が基本形です。内側ほど抽象度が高く安定し、外側ほど具体的で変わりやすいものを置きます。ヘキサゴナル(ポート&アダプター)やオニオンアーキテクチャと狙いは共通です。",
+    apply: {
+      text: "「Webフレームワークの中にビジネスロジックを書く」構成を、レイヤーごとに分離した構成に変えます。",
+      code: `// ❌ Before: ルーティング関数の中に全部入り
+app.post("/hire", async (req, res) => {
+  if (req.body.salary < 0) return res.status(400).send();
+  await db.query("INSERT INTO employees ...", [req.body.name]);
+  res.json({ ok: true });
+  // 業務ルール・SQL・HTTPが混ざり、テストにはWebとDBが必要
+});
+
+// ✅ After: 同心円のレイヤーに分離
+// [エンティティ] 最重要ルール(何にも依存しない)
+class Employee {
+  constructor(public name: string, public salary: number) {
+    if (salary < 0) throw new Error("給与は0未満にできない");
+  }
+}
+// [ユースケース] アプリ固有の手順(内側と自層の抽象のみ参照)
+class HireEmployee {
+  constructor(private repo: EmployeeRepository) {}
+  async run(name: string, salary: number) {
+    await this.repo.save(new Employee(name, salary));
+  }
+}
+// [アダプター] HTTP形式 ⇔ ユースケース形式の変換
+// [詳細] Express・DBドライバは最外周で組み立てる`,
+    },
+    benefits: "・重要なビジネスルールがUI・DB・フレームワークの変更に巻き込まれない\n・エンティティとユースケースを、Web/DBなしの高速なテストで検証できる\n・「どのDBを使うか」などの決定を遅らせられる(詳細は後から差し替え可能)\n・レイヤーごとに関心が分かれ、どこに何を書くべきかの共通言語ができる",
+    langExamples: [
+      {
+        lang: "Rust",
+        code: `// エンティティ: 何にも依存しない
+struct Employee {
+    name: String,
+    salary: u64,
+}
+
+// ユースケース層が所有するポート(抽象)
+trait EmployeeRepository {
+    fn save(&self, employee: &Employee);
+}
+
+// ユースケース: エンティティとポートだけを知る
+struct HireEmployee<R: EmployeeRepository> {
+    repo: R,
+}
+impl<R: EmployeeRepository> HireEmployee<R> {
+    fn run(&self, name: &str, salary: u64) {
+        let employee = Employee {
+            name: name.into(),
+            salary,
+        };
+        self.repo.save(&employee);
+    }
+}
+// DB実装(impl EmployeeRepository for PostgresRepo)は外側の層に置く`,
+      },
+      {
+        lang: "F#",
+        code: `// エンティティ: 純粋なレコードとルール
+type Employee = { Name: string; Salary: int64 }
+
+// ユースケース層が所有するポート
+type IEmployeeRepository =
+    abstract Save: Employee -> unit
+
+// ユースケース: 内側と自層の抽象だけを参照する
+type HireEmployee(repo: IEmployeeRepository) =
+    member _.Run(name, salary) =
+        if salary < 0L then invalidArg "salary" "給与は0未満にできない"
+        repo.Save { Name = name; Salary = salary }
+
+// DB実装・Webハンドラは外側で組み立てる(関数注入でも可)`,
+      },
+      {
+        lang: "Kotlin",
+        code: `// エンティティ: フレームワーク非依存
+class Employee(val name: String, val salary: Long) {
+    init { require(salary >= 0) { "給与は0未満にできない" } }
+}
+
+// ユースケース層が所有するポート
+interface EmployeeRepository {
+    fun save(employee: Employee)
+}
+
+// ユースケース: エンティティとポートだけを知る
+class HireEmployee(private val repo: EmployeeRepository) {
+    fun run(name: String, salary: Long) {
+        repo.save(Employee(name, salary))
+    }
+}
+// Spring等のフレームワークやDB実装は最外周のモジュールに置く`,
+      },
+      {
+        lang: "TypeScript",
+        code: `// エンティティ: 何にも依存しない
+class Employee {
+  constructor(public name: string, public salary: number) {
+    if (salary < 0) throw new Error("給与は0未満にできない");
+  }
+}
+
+// ユースケース層が所有するポート
+interface EmployeeRepository {
+  save(employee: Employee): Promise<void>;
+}
+
+// ユースケース: エンティティとポートだけを知る
+class HireEmployee {
+  constructor(private repo: EmployeeRepository) {}
+  async run(name: string, salary: number) {
+    await this.repo.save(new Employee(name, salary));
+  }
+}
+// Express・Prisma等は最外周で接続する`,
+    },
+    ],
+    domain: {
+      text: "企業・従業員を扱う経済情報アプリを4層に整理した例です。各レイヤーの役割と置くものが一目で分かるように、依存の向き(→は「参照する」)も添えています。",
+      code: `// [1. エンティティ] 企業横断の最重要ルール(依存なし)
+//   Company, Employee, 「給与は0未満にできない」等の業務ルール
+class Company {
+  private employees: Employee[] = [];
+  hire(e: Employee) {
+    if (this.employees.length >= 10_000) {
+      throw new Error("雇用上限を超過");  // 業務ルール
+    }
+    this.employees.push(e);
+  }
+}
+
+// [2. ユースケース] アプリ固有の手順(→ エンティティ)
+//   「企業に従業員を雇用する」「決算レポートを出す」
+//   + 自層で定義するポート: CompanyRepository, ReportOutput
+
+// [3. インターフェースアダプター] 形式の変換(→ ユースケース)
+//   HireController: HTTPリクエスト → ユースケースの入力へ変換
+//   CompanyGateway: ポートを実装し、SQLの結果 ⇔ エンティティを変換
+
+// [4. フレームワーク&ドライバー] 詳細(→ アダプター)
+//   Express / PostgreSQL / React などの道具と起動・配線コード
+
+// 依存はつねに 4 → 3 → 2 → 1 の内向きだけ。
+// 「DBを乗り換える」変更は3と4だけで完結し、1と2は無傷で済む`,
+    },
+  },
+
+  "dependency-rule": {
+    title: "依存性のルール",
+    what: "依存性のルール(The Dependency Rule)は、クリーンアーキテクチャで唯一の絶対ルールです。「ソースコードの依存は、内側(抽象度の高い方)にのみ向かってよい」——内側の円は、外側の円に定義された名前(クラス・関数・変数)を一切参照してはいけません。内側が外側の機能(DB保存など)を必要とする場合は、内側がインターフェース(ポート)を定義し、外側が実装します(SOLIDのDIP)。実行時の制御が外へ流れても、ソースコードの依存は内向きのまま保てます。",
+    apply: {
+      text: "ユースケースがDBライブラリを直接importしている違反状態を、ポート(内側が所有する抽象)+実装(外側)に分離します。",
+      code: `// ❌ Before: 内側(ユースケース)が外側(DBライブラリ)に依存
+import { MySqlClient } from "mysql-driver";  // 依存が外向き!
+
+class HireEmployee {
+  private db = new MySqlClient("mysql://...");
+  async run(name: string) {
+    await this.db.query("INSERT INTO employees ...", [name]);
+  }
+}
+
+// ✅ After: 内側がポートを定義し、外側が実装する
+// --- ユースケース層(内側) ---
+interface EmployeeRepository {          // 内側が所有する抽象
+  save(employee: Employee): Promise<void>;
+}
+class HireEmployee {
+  constructor(private repo: EmployeeRepository) {}
+  async run(name: string, salary: number) {
+    await this.repo.save(new Employee(name, salary));
+  }
+}
+
+// --- インフラ層(外側) ---
+import { MySqlClient } from "mysql-driver"; // 外側ならOK
+class MySqlEmployeeRepository implements EmployeeRepository {
+  async save(e: Employee) { /* INSERT文を発行 */ }
+}
+// 依存の向き: 外側(MySql実装) → 内側(ポート)。ルール遵守`,
+    },
+    benefits: "・外側(DB・フレームワーク)の変更が内側の重要なコードに波及しない\n・内側だけを取り出してテストできる(外側はモックに差し替え)\n・「この import は内向きか?」というシンプルな基準でレビューできる\n・実装の乗り換え(MySQL→PostgreSQL)が外側の差し替えだけで済む",
+    langExamples: [
+      {
+        lang: "Rust",
+        code: `// 内側のクレート(モジュール): ポートを所有
+mod usecase {
+    pub trait EmployeeRepository {
+        fn save(&self, name: &str);
+    }
+
+    pub struct HireEmployee<R: EmployeeRepository> {
+        pub repo: R,
+    }
+    impl<R: EmployeeRepository> HireEmployee<R> {
+        pub fn run(&self, name: &str) {
+            self.repo.save(name);
+        }
+    }
+}
+
+// 外側のモジュール: 内側のポートを実装する(依存は内向き)
+mod infra {
+    use super::usecase::EmployeeRepository;
+
+    pub struct PostgresRepository;
+    impl EmployeeRepository for PostgresRepository {
+        fn save(&self, _name: &str) { /* SQL発行 */ }
+    }
+}`,
+      },
+      {
+        lang: "F#",
+        code: `// 内側: ポートの定義とユースケース
+module UseCase =
+    type IEmployeeRepository =
+        abstract Save: name: string -> unit
+
+    let hireEmployee (repo: IEmployeeRepository) name =
+        repo.Save name
+
+// 外側: 内側のポートを実装(依存は内向き)
+module Infra =
+    open UseCase
+
+    type PostgresRepository() =
+        interface IEmployeeRepository with
+            member _.Save name = () // SQL発行
+
+// F#はプロジェクト内でファイルの後方参照ができないため、
+// 「内側を先に定義する」構造がコンパイラで強制される`,
+      },
+      {
+        lang: "Kotlin",
+        code: `// 内側のモジュール(usecase): ポートを所有
+interface EmployeeRepository {
+    fun save(name: String)
+}
+
+class HireEmployee(private val repo: EmployeeRepository) {
+    fun run(name: String) = repo.save(name)
+}
+
+// 外側のモジュール(infra): 内側に依存して実装
+class PostgresEmployeeRepository : EmployeeRepository {
+    override fun save(name: String) { /* SQL発行 */ }
+}
+
+// Gradleのモジュール分割で「infra → usecase」の
+// 一方向依存をビルドレベルで強制できる`,
+      },
+      {
+        lang: "TypeScript",
+        code: `// 内側(usecase/): ポートを所有
+export interface EmployeeRepository {
+  save(name: string): Promise<void>;
+}
+
+export class HireEmployee {
+  constructor(private repo: EmployeeRepository) {}
+  run(name: string) { return this.repo.save(name); }
+}
+
+// 外側(infra/): 内側のポートを実装(importは内向き)
+import { EmployeeRepository } from "../usecase/ports";
+
+export class PostgresEmployeeRepository implements EmployeeRepository {
+  async save(name: string) { /* SQL発行 */ }
+}
+
+// ESLintのimportルールで「usecase/はinfra/を
+// importできない」を機械的に強制できる`,
+      },
+    ],
+    domain: {
+      text: "「株価データの取得元を大手ベンダーAPIから取引所直結に乗り換える」というよくある変更を、依存性のルールが守られている場合とそうでない場合で比べます。",
+      code: `// 内側(ユースケース層)が所有するポート
+interface StockPriceProvider {
+  latest(company: Company): Promise<number>;
+}
+
+// ユースケース: 従業員(アナリスト)向けのウォッチリスト評価
+class EvaluateWatchList {
+  constructor(private prices: StockPriceProvider) {}
+  async run(companies: Company[]): Promise<number> {
+    let total = 0;
+    for (const c of companies) total += await this.prices.latest(c);
+    return total;
+  }
+}
+
+// 外側: ベンダーAPI実装(v1)
+class VendorApiProvider implements StockPriceProvider {
+  async latest(c: Company) { /* ベンダーSDK呼び出し */ return 0; }
+}
+// 外側: 取引所直結実装(v2)— 乗り換えはこのクラスを足すだけ
+class ExchangeDirectProvider implements StockPriceProvider {
+  async latest(c: Company) { /* 取引所プロトコル */ return 0; }
+}
+
+// 依存性のルールが守られていれば、
+// EvaluateWatchList(内側)は乗り換えの前後で1文字も変わらない。
+// 違反してベンダーSDKを直接importしていたら、全ユースケースを修正する羽目に`,
+    },
+  },
+
+  "entities": {
+    title: "エンティティ",
+    what: "エンティティは同心円の最も内側に位置し、企業全体(アプリケーション横断)で通用する最重要ビジネスルールを持つ層です。「給与は0未満にできない」「約定は営業日にしか成立しない」のような、UIがWebでもCLIでも、DBが何であっても変わらないルールをオブジェクト(またはデータ構造+関数)として表現します。何にも依存しないため最も安定し、最も再利用しやすい層です。",
+    apply: {
+      text: "検証ロジックがControllerやDB層に散らばった状態から、ルールをエンティティ自身に集めます。",
+      code: `// ❌ Before: 業務ルールがあちこちに散在
+// controller.ts
+if (req.body.salary < 0) return res.status(400).send();
+// batch.ts(別の入口では検証を忘れている…)
+db.insert("employees", { salary: csvRow.salary });
+
+// ✅ After: ルールをエンティティに集約(壊れた状態を作れない)
+class Employee {
+  readonly name: string;
+  readonly salary: number;
+
+  constructor(name: string, salary: number) {
+    if (name.trim() === "") throw new Error("氏名は必須");
+    if (salary < 0) throw new Error("給与は0未満にできない");
+    this.name = name;
+    this.salary = salary;
+  }
+
+  withRaise(rate: number): Employee {
+    if (rate > 0.2) throw new Error("昇給は1回20%まで");
+    return new Employee(this.name, Math.round(this.salary * (1 + rate)));
+  }
+}
+// Webから来てもCSVバッチから来ても、Employeeを通る限りルールが守られる`,
+    },
+    benefits: "・業務ルールが1箇所に集まり、入口(Web/バッチ/CLI)ごとの検証漏れがなくなる\n・何にも依存しないため、単体テストが最も簡単で高速\n・UI・DB・フレームワークをすべて捨てても生き残る、寿命の長いコードになる\n・ドメインの用語がそのままクラス名・メソッド名になり、仕様書代わりに読める",
+    langExamples: [
+      {
+        lang: "Rust",
+        code: `// コンストラクタ関数でルールを強制し、
+// 不正な値のEmployeeを作れなくする
+pub struct Employee {
+    name: String,
+    salary: u64, // u64型自体が「負の給与」を排除している
+}
+
+impl Employee {
+    pub fn new(name: &str, salary: u64) -> Result<Self, String> {
+        if name.trim().is_empty() {
+            return Err("氏名は必須".into());
+        }
+        Ok(Self { name: name.into(), salary })
+    }
+
+    pub fn with_raise(&self, rate: f64) -> Result<Self, String> {
+        if rate > 0.2 {
+            return Err("昇給は1回20%まで".into());
+        }
+        let new_salary = (self.salary as f64 * (1.0 + rate)) as u64;
+        Employee::new(&self.name, new_salary)
+    }
+}`,
+      },
+      {
+        lang: "F#",
+        code: `// privateコンストラクタ+スマートコンストラクタで
+// 「不正なEmployeeは存在できない」を型で表現
+type Employee = private { Name: string; Salary: int64 }
+
+module Employee =
+    let create name salary =
+        if System.String.IsNullOrWhiteSpace name then
+            Error "氏名は必須"
+        elif salary < 0L then
+            Error "給与は0未満にできない"
+        else
+            Ok { Name = name; Salary = salary }
+
+    let withRaise rate employee =
+        if rate > 0.2 then Error "昇給は1回20%まで"
+        else
+            let newSalary = float employee.Salary * (1.0 + rate)
+            create employee.Name (int64 newSalary)`,
+      },
+      {
+        lang: "Kotlin",
+        code: `// initブロックでルールを強制する
+class Employee(val name: String, val salary: Long) {
+    init {
+        require(name.isNotBlank()) { "氏名は必須" }
+        require(salary >= 0) { "給与は0未満にできない" }
+    }
+
+    fun withRaise(rate: Double): Employee {
+        require(rate <= 0.2) { "昇給は1回20%まで" }
+        return Employee(name, (salary * (1 + rate)).toLong())
+    }
+}
+
+// ORMアノテーションやSpring依存をこのクラスに
+// 持ち込まないことが「内側を守る」ポイント`,
+      },
+      {
+        lang: "TypeScript",
+        code: `class Employee {
+  readonly name: string;
+  readonly salary: number;
+
+  constructor(name: string, salary: number) {
+    if (name.trim() === "") throw new Error("氏名は必須");
+    if (salary < 0) throw new Error("給与は0未満にできない");
+    this.name = name;
+    this.salary = salary;
+  }
+
+  withRaise(rate: number): Employee {
+    if (rate > 0.2) throw new Error("昇給は1回20%まで");
+    return new Employee(
+      this.name,
+      Math.round(this.salary * (1 + rate)),
+    );
+  }
+}`,
+      },
+    ],
+    domain: {
+      text: "企業(Company)エンティティに「上場企業の役員は2名以上」「従業員の雇用上限」といった業務ルールを持たせた例です。これらのルールはどんなUI・DBでも変わらない、アプリの核です。",
+      code: `class Company {
+  private employees: Employee[] = [];
+
+  constructor(
+    public readonly name: string,
+    public readonly isListed: boolean,  // 上場企業か
+  ) {}
+
+  hire(e: Employee) {
+    if (this.employees.length >= 10_000) {
+      throw new Error("雇用上限(10,000名)を超過");
+    }
+    this.employees.push(e);
+  }
+
+  // 業務ルール: 上場企業は役員が2名以上必要
+  canFileDisclosure(): boolean {
+    const executives = this.employees.filter(e => e.isExecutive);
+    return !this.isListed || executives.length >= 2;
+  }
+
+  totalPayroll(): number {
+    return this.employees.reduce((s, e) => s + e.salary, 0);
+  }
+}
+
+// このクラスはWebフレームワークもDBも知らないので、
+// テストは new Company(...) して呼ぶだけ。1ミリ秒で終わる`,
+    },
+  },
+
+  "usecases": {
+    title: "ユースケース",
+    what: "ユースケース層はエンティティの1つ外側にあり、「従業員を雇用する」「決算レポートを出力する」といったアプリケーション固有の操作手順(アプリケーションビジネスルール)を表現します。エンティティを取得し、業務ルールを実行させ、結果を保存・出力する——という指揮者の役割です。参照してよいのは内側(エンティティ)と、自層で定義した抽象(リポジトリや出力のポート)だけで、Web・DB・画面の詳細は知りません。",
+    apply: {
+      text: "「雇用する」という操作の手順をユースケースクラスに整理します。入出力はポート(抽象)経由にします。",
+      code: `// ユースケース層で定義するポート(抽象)
+interface CompanyRepository {
+  find(id: string): Promise<Company>;
+  save(company: Company): Promise<void>;
+}
+
+// ユースケース: 手順の指揮に徹する
+class HireEmployeeUseCase {
+  constructor(private companies: CompanyRepository) {}
+
+  async run(input: { companyId: string; name: string; salary: number }) {
+    // 1. エンティティを取得
+    const company = await this.companies.find(input.companyId);
+    // 2. 業務ルールはエンティティに実行させる
+    const employee = new Employee(input.name, input.salary);
+    company.hire(employee);
+    // 3. ポート経由で保存(DBの種類は知らない)
+    await this.companies.save(company);
+    return { hired: employee.name };
+  }
+}
+// HTTPのステータスコードもSQLも画面も、この層には登場しない`,
+    },
+    benefits: "・「このアプリに何ができるか」がユースケースクラスの一覧として見える化される\n・手順(ユースケース)とルール(エンティティ)が分離され、それぞれ単体でテストできる\n・同じユースケースをWeb・CLI・バッチなど複数の入口から再利用できる\n・詳細(DB・UI)の変更がユースケースに波及しない",
+    langExamples: [
+      {
+        lang: "Rust",
+        code: `pub trait CompanyRepository {
+    fn find(&self, id: &str) -> Company;
+    fn save(&self, company: &Company);
+}
+
+pub struct HireEmployee<R: CompanyRepository> {
+    companies: R,
+}
+
+impl<R: CompanyRepository> HireEmployee<R> {
+    pub fn run(&self, company_id: &str, name: &str, salary: u64) {
+        let mut company = self.companies.find(company_id);
+        let employee = Employee::new(name, salary).unwrap();
+        company.hire(employee);        // ルールはエンティティが実行
+        self.companies.save(&company); // 保存先の詳細は知らない
+    }
+}`,
+      },
+      {
+        lang: "F#",
+        code: `// 関数型スタイルでは、ユースケースは
+// 「依存(関数)を受け取って手順を実行する関数」になる
+type FindCompany = string -> Company
+type SaveCompany = Company -> unit
+
+let hireEmployee
+    (find: FindCompany)
+    (save: SaveCompany)
+    companyId name salary =
+    let company = find companyId
+    match Employee.create name salary with
+    | Ok employee ->
+        company |> Company.hire employee |> save
+        Ok employee
+    | Error e -> Error e
+
+// 部分適用で依存を注入して「実行可能なユースケース」を作る
+// let hire = hireEmployee Postgres.find Postgres.save`,
+      },
+      {
+        lang: "Kotlin",
+        code: `interface CompanyRepository {
+    fun find(id: String): Company
+    fun save(company: Company)
+}
+
+class HireEmployeeUseCase(
+    private val companies: CompanyRepository,
+) {
+    data class Input(val companyId: String, val name: String, val salary: Long)
+
+    fun run(input: Input): String {
+        val company = companies.find(input.companyId)
+        val employee = Employee(input.name, input.salary)
+        company.hire(employee)   // ルールはエンティティが実行
+        companies.save(company)  // 保存先の詳細は知らない
+        return employee.name
+    }
+}`,
+      },
+      {
+        lang: "TypeScript",
+        code: `interface CompanyRepository {
+  find(id: string): Promise<Company>;
+  save(company: Company): Promise<void>;
+}
+
+class HireEmployeeUseCase {
+  constructor(private companies: CompanyRepository) {}
+
+  async run(input: { companyId: string; name: string; salary: number }) {
+    const company = await this.companies.find(input.companyId);
+    const employee = new Employee(input.name, input.salary);
+    company.hire(employee);
+    await this.companies.save(company);
+    return { hired: employee.name };
+  }
+}`,
+      },
+    ],
+    domain: {
+      text: "経済情報アプリのユースケース一覧のイメージです。ユースケース名がそのまま「アプリの機能一覧」になり、それぞれがエンティティとポートだけで完結します。",
+      code: `// このアプリにできること = ユースケースの一覧
+class HireEmployeeUseCase { /* 企業に従業員を雇用する */ }
+class RaiseSalaryUseCase { /* 従業員を昇給させる(上限20%ルール) */ }
+class GenerateEarningsReportUseCase { /* 企業の決算レポートを出す */ }
+class ScreenCompaniesUseCase { /* 条件で企業を検索する */ }
+
+// 例: 決算レポート出力
+interface CompanyRepository { find(id: string): Promise<Company>; }
+interface ReportOutput { emit(report: EarningsReport): void; } // 出力ポート
+
+class GenerateEarningsReportUseCase {
+  constructor(
+    private companies: CompanyRepository,
+    private output: ReportOutput,   // PDFかHTMLかは知らない
+  ) {}
+
+  async run(companyId: string) {
+    const company = await this.companies.find(companyId);
+    const report = EarningsReport.from(company); // エンティティのルールで生成
+    this.output.emit(report);
+  }
+}
+
+// 同じユースケースを、Web画面からも月次バッチからも呼び出せる。
+// テストはインメモリのRepositoryと記録用Outputを渡すだけ`,
+    },
+  },
+
+  "interface-adapters": {
+    title: "インターフェースアダプター",
+    what: "インターフェースアダプター層は、ユースケースの1つ外側で「形式の変換」を担当する層です。Controller(外の入力→ユースケースの入力へ変換)、Presenter(ユースケースの出力→画面向けのViewModelへ変換)、Gateway(ユースケースのポートを実装し、エンティティ⇔DBレコードを変換)が代表です。内側の形式と外側の形式が混ざらないよう、両者の翻訳者に徹します。",
+    apply: {
+      text: "HTTPの世界とユースケースの世界を、ControllerとPresenterが翻訳する形にします。",
+      code: `// Controller: HTTP形式 → ユースケースの入力へ変換
+class HireController {
+  constructor(private useCase: HireEmployeeUseCase) {}
+
+  async handle(req: HttpRequest): Promise<HttpResponse> {
+    try {
+      const result = await this.useCase.run({
+        companyId: req.params.id,        // HTTPの都合はここで吸収
+        name: req.body.name,
+        salary: Number(req.body.salary),
+      });
+      return { status: 201, body: result };
+    } catch (e) {
+      return { status: 400, body: { error: (e as Error).message } };
+    }
+  }
+}
+
+// Gateway: ユースケースのポートを実装し、形式を変換
+class CompanyGateway implements CompanyRepository {
+  async find(id: string): Promise<Company> {
+    const row = await sql("SELECT ... WHERE id = ?", [id]);
+    return new Company(row.name, row.is_listed === 1); // レコード→エンティティ
+  }
+  async save(company: Company) { /* エンティティ→レコード */ }
+}`,
+    },
+    benefits: "・内側(ユースケース)がHTTPステータスやSQLの都合を知らずに済む\n・画面表示の変更(日付形式、通貨表示など)がPresenterの修正だけで完結する\n・DBスキーマとエンティティを独立に進化させられる(Gatewayが吸収)\n・変換ロジックが層として明示され、「どこで変換するか」に迷わない",
+    langExamples: [
+      {
+        lang: "Rust",
+        code: `// Gateway: ユースケースのポートを実装し、
+// DBレコード ⇔ エンティティを変換する
+struct EmployeeRow {
+    name: String,
+    salary_yen: i64, // DBの都合の型
+}
+
+struct EmployeeGateway;
+impl EmployeeRepository for EmployeeGateway {
+    fn save(&self, employee: &Employee) {
+        let row = EmployeeRow {
+            name: employee.name().to_string(),
+            salary_yen: employee.salary() as i64,
+        };
+        // INSERT文を発行(SQLはこの層まで)
+    }
+}`,
+      },
+      {
+        lang: "F#",
+        code: `// Presenter: ユースケースの出力を表示用に変換
+type ReportViewModel = {
+    Title: string
+    FormattedProfit: string  // "1,234百万円" のような表示形式
+}
+
+module ReportPresenter =
+    let present (report: EarningsReport) =
+        { Title = $"{report.CompanyName} 決算"
+          FormattedProfit =
+            report.Profit / 1_000_000L
+            |> fun m -> $"%s{m.ToString(\"N0\")}百万円" }
+
+// ユースケースは金額をint64で返すだけ。
+// 「百万円単位・カンマ区切り」は表示の都合なのでこの層で行う`,
+      },
+      {
+        lang: "Kotlin",
+        code: `// Controller: HTTP形式 → ユースケースの入力へ変換
+class HireController(private val useCase: HireEmployeeUseCase) {
+    fun handle(req: HttpRequest): HttpResponse =
+        try {
+            val name = useCase.run(
+                HireEmployeeUseCase.Input(
+                    companyId = req.pathParam("id"),
+                    name = req.body["name"] ?: error("nameは必須"),
+                    salary = req.body["salary"]?.toLong() ?: 0,
+                )
+            )
+            HttpResponse(201, mapOf("hired" to name))
+        } catch (e: IllegalArgumentException) {
+            HttpResponse(400, mapOf("error" to e.message))
+        }
+}
+// ユースケースはHttpRequestを一切知らない`,
+      },
+      {
+        lang: "TypeScript",
+        code: `// Presenter: ユースケースの出力 → 画面用ViewModel
+interface ReportViewModel {
+  title: string;
+  formattedProfit: string;  // "1,234百万円"
+}
+
+class ReportPresenter {
+  present(report: EarningsReport): ReportViewModel {
+    return {
+      title: report.companyName + " 決算",
+      formattedProfit:
+        (report.profit / 1_000_000).toLocaleString("ja-JP") + "百万円",
+    };
+  }
+}
+
+// ユースケースは数値を返すだけ。表示形式はこの層の責務`,
+      },
+    ],
+    domain: {
+      text: "「企業の決算サマリーを表示する」機能を通しで見た例です。HTTP→ユースケース→エンティティ→Gateway(DB)→Presenter(表示形式)と、各アダプターが変換を担当します。",
+      code: `// [Controller] GET /companies/7203/earnings
+class EarningsController {
+  constructor(private useCase: GenerateEarningsReportUseCase) {}
+  async handle(req: HttpRequest) {
+    return this.useCase.run(req.params.companyId); // HTTP→入力へ変換
+  }
+}
+
+// [Gateway] ユースケースのポートを実装(DBの形式を吸収)
+class CompanyGateway implements CompanyRepository {
+  async find(id: string): Promise<Company> {
+    const row = await sql("SELECT * FROM companies WHERE code = ?", [id]);
+    // snake_caseのレコード → エンティティへ変換
+    return new Company(row.company_name, row.is_listed === 1);
+  }
+}
+
+// [Presenter] 従業員(アナリスト)向け画面の表示形式へ変換
+class EarningsPresenter implements ReportOutput {
+  viewModel: ReportViewModel | null = null;
+  emit(report: EarningsReport) {
+    this.viewModel = {
+      title: report.companyName + " 2026年3月期",
+      formattedProfit:
+        (report.profit / 1_000_000).toLocaleString("ja-JP") + "百万円",
+      badge: report.isRecordHigh ? "過去最高益" : "",
+    };
+  }
+}
+// 表示を「億円単位」に変えたくなってもPresenterだけ直せばよい`,
+    },
+  },
+
+  "details-outside": {
+    title: "フレームワークとドライバー(詳細)",
+    what: "最外周のフレームワーク&ドライバー層には、Webフレームワーク・データベース・UI・外部APIクライアントなどの「詳細」を置きます。クリーンアーキテクチャでは「DBは詳細」「フレームワークは詳細」と考えます——ビジネスルールから見れば、それらは交換可能な道具にすぎないからです。詳細を外側に閉じ込めることで、「どのDBを使うか」といった決定を遅らせ、後からの乗り換えも可能にします。アプリの組み立て(どの実装をどのポートに注入するか)も、この最外周のmain関数が担います。",
+    apply: {
+      text: "最外周のmain(組み立てコード)で、各ポートに実装を配線します。内側のコードは組み立て方を知りません。",
+      code: `// main.ts — 最外周: 詳細を選んで配線する唯一の場所
+import express from "express";                       // 詳細
+import { PostgresCompanyRepository } from "./infra"; // 詳細
+import { HireEmployeeUseCase } from "./usecase";     // 内側
+import { HireController } from "./adapters";         // 変換係
+
+// 組み立て: ポートに実装を注入する
+const repo = new PostgresCompanyRepository("postgres://...");
+const useCase = new HireEmployeeUseCase(repo);
+const controller = new HireController(useCase);
+
+// フレームワークへの接続もここだけ
+const app = express();
+app.post("/companies/:id/hire", (req, res) =>
+  controller.handle(req).then(r => res.status(r.status).json(r.body)));
+app.listen(3000);
+
+// テスト時は同じ部品を別の組み立て方で使う:
+// new HireEmployeeUseCase(new InMemoryCompanyRepository())`,
+    },
+    benefits: "・「どのDB・どのフレームワークにするか」の決定を後回しにできる(選択肢を保てる)\n・乗り換え(Express→Fastify、MySQL→PostgreSQL)が最外周の差し替えで済む\n・組み立て場所が1箇所(main)に集まり、アプリの構成が一覧できる\n・テストでは同じ部品をインメモリ実装で組み立て直せるため、高速で安定したテストになる",
+    langExamples: [
+      {
+        lang: "Rust",
+        code: `// main.rs — 最外周で実装を選んで組み立てる
+fn main() {
+    // 詳細の選択はここに集約される
+    let repo = PostgresCompanyRepository::connect("postgres://...");
+    let use_case = HireEmployee { companies: repo };
+
+    // Webフレームワーク(axum等)への接続もここだけ
+    serve(use_case);
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn hire_works_without_db() {
+        // テストでは同じ部品をインメモリ実装で組み立てる
+        let use_case = HireEmployee {
+            companies: InMemoryRepository::new(),
+        };
+        use_case.run("acme", "佐藤", 5_000_000);
+    }
+}`,
+      },
+      {
+        lang: "F#",
+        code: `// Program.fs — 最外周(F#では最後のファイル)で組み立てる
+[<EntryPoint>]
+let main _ =
+    // 詳細の選択と配線はここだけ
+    let find = Postgres.findCompany "postgres://..."
+    let save = Postgres.saveCompany "postgres://..."
+
+    // 部分適用でユースケースを組み立てる
+    let hire = UseCase.hireEmployee find save
+
+    Web.serve hire // Webフレームワークへの接続
+    0
+
+// テストではインメモリの関数を部分適用するだけ:
+// let hire = UseCase.hireEmployee InMemory.find InMemory.save`,
+      },
+      {
+        lang: "Kotlin",
+        code: `// Main.kt — 最外周: 組み立て(Composition Root)
+fun main() {
+    // 詳細の選択はここに集約
+    val repo = PostgresCompanyRepository(url = "jdbc:postgresql://...")
+    val useCase = HireEmployeeUseCase(repo)
+    val controller = HireController(useCase)
+
+    // フレームワーク(Ktor等)への接続もここだけ
+    startServer(controller)
+}
+
+// テストでは同じ部品を差し替えて組み立てる
+class HireEmployeeUseCaseTest {
+    @Test
+    fun \`DBなしで雇用できる\`() {
+        val useCase = HireEmployeeUseCase(InMemoryCompanyRepository())
+        useCase.run(HireEmployeeUseCase.Input("acme", "佐藤", 5_000_000))
+    }
+}`,
+      },
+      {
+        lang: "TypeScript",
+        code: `// main.ts — 最外周: 組み立て(Composition Root)
+const repo = new PostgresCompanyRepository("postgres://...");
+const useCase = new HireEmployeeUseCase(repo);
+const controller = new HireController(useCase);
+
+const app = express();
+app.post("/companies/:id/hire", (req, res) =>
+  controller.handle(req).then(r => res.status(r.status).json(r.body)));
+app.listen(3000);
+
+// テストは同じ部品をインメモリで組み立て直す
+test("DBなしで雇用できる", async () => {
+  const useCase = new HireEmployeeUseCase(new InMemoryCompanyRepository());
+  const result = await useCase.run(
+    { companyId: "acme", name: "佐藤", salary: 5_000_000 });
+  expect(result.hired).toBe("佐藤");
+});`,
+      },
+    ],
+    domain: {
+      text: "経済情報アプリの「詳細」が差し替わっていく現実的なシナリオです。ビジネスルール(企業・従業員・ユースケース)は無傷のまま、外側だけが入れ替わります。",
+      code: `// ---- リリース時の構成 ----
+const app = buildApp({
+  companyRepo: new PostgresCompanyRepository(),  // DB: PostgreSQL
+  priceProvider: new VendorApiProvider(),        // 株価: ベンダーAPI
+  notifier: new EmailNotifier(),                 // 通知: メール
+});
+
+// ---- 1年後: 事情が変わっても組み立ての差し替えだけ ----
+const app2 = buildApp({
+  companyRepo: new DynamoCompanyRepository(),    // コスト削減でDynamoへ
+  priceProvider: new ExchangeDirectProvider(),   // 取引所直結に乗り換え
+  notifier: new SlackNotifier(),                 // 通知はSlackに変更
+});
+
+// ---- テスト・デモ環境 ----
+const demoApp = buildApp({
+  companyRepo: new InMemoryCompanyRepository([acme, globex]),
+  priceProvider: new FixturePriceProvider(1000), // 固定値
+  notifier: new NoopNotifier(),
+});
+
+// Company・Employee・各ユースケースのコードは
+// 3つの構成すべてで同一。これが「詳細を外に追いやる」効果`,
     },
   },
 };
