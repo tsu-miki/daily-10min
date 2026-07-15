@@ -156,6 +156,27 @@ const QUIZ_CONCEPT_GROUPS = {
       },
     ],
   },
+  "immutable-data-model": {
+    intro:
+      "イミュータブルデータモデルは、「UPDATEが必要になるのは設計のにおい」と捉え、起きた事実を不変の記録として積み上げていくデータ設計手法です。リソースとイベントの分類を出発点に、イベントの不変化・履歴の設計・削除の扱いを学び、最後にプログラミングの不変性との接続まで見ていきます。",
+    groups: [
+      {
+        name: "全体像",
+        description: "なぜUPDATEを減らすのか、何が得られるのか",
+        concepts: ["immutable-model-overview"],
+      },
+      {
+        name: "モデリングの技法",
+        description: "分類・イベント設計・履歴・削除の扱い",
+        concepts: ["resource-event", "event-design", "resource-history", "logical-delete"],
+      },
+      {
+        name: "コードとの接続",
+        description: "プログラミングの不変性とイベントソーシング",
+        concepts: ["immutability-in-code"],
+      },
+    ],
+  },
 };
 
 const QUIZ_CONCEPTS = {
@@ -7463,6 +7484,1050 @@ const sorted = useMemo(
    ・Core Web VitalsをCIで継続計測
    ・「バンドル+10%でCI警告」を設定
    → 改善が退行しない仕組みまでがパフォーマンス改善`,
+    },
+  },
+
+  // ===================================================
+  // イミュータブルデータモデル
+  // ===================================================
+  "immutable-model-overview": {
+    title: "イミュータブルデータモデル(全体像)",
+    what: "イミュータブルデータモデルは、起きた事実を不変の記録として積み上げ(INSERT中心)、UPDATEを極力なくすデータ設計手法です。「UPDATEが必要になるのは、複数の事実が1つのレコードに混ざっているサイン」と捉え、モデルを見直します。上書きは過去の事実——変更前の値・変更の時刻・理由——を消してしまいますが、事実を追記する設計なら履歴・監査証跡・集計の再現性が構造として手に入ります。現在の状態は「事実の集計」として導出します。",
+    apply: {
+      text: "口座残高を「上書き」する設計から、「入出金の事実を積み上げ、残高は導出する」設計に変えます。",
+      code: `── ❌ 状態を上書きする設計 ─────────────
+CREATE TABLE accounts (
+  account_id  BIGINT PRIMARY KEY,
+  balance     DECIMAL      -- 入出金のたびにUPDATE
+);
+UPDATE accounts SET balance = balance - 30000
+ WHERE account_id = 1;
+-- 「いつ・いくら・なぜ動いたか」はもう分からない。
+-- 同時更新の競合(ロック)も起きやすい
+
+── ✅ 事実を積み上げる設計 ─────────────
+CREATE TABLE deposits (          -- 入金イベント
+  deposit_id  BIGINT PRIMARY KEY,
+  account_id  BIGINT NOT NULL,
+  amount      DECIMAL NOT NULL,
+  deposited_at TIMESTAMP NOT NULL
+);
+CREATE TABLE withdrawals (       -- 出金イベント
+  withdrawal_id BIGINT PRIMARY KEY,
+  account_id  BIGINT NOT NULL,
+  amount      DECIMAL NOT NULL,
+  withdrawn_at TIMESTAMP NOT NULL
+);
+-- 記録はINSERTのみ。残高は事実から導出する:
+SELECT (SELECT COALESCE(SUM(amount),0) FROM deposits
+         WHERE account_id = 1)
+     - (SELECT COALESCE(SUM(amount),0) FROM withdrawals
+         WHERE account_id = 1) AS balance;
+-- 全履歴が残るので「先月末の残高」も再現できる`,
+    },
+    benefits: "・変更履歴・監査証跡が設計に組み込まれ、「いつ誰が何をしたか」が常に答えられる\n・任意の時点の状態を再現できる(先月末時点のレポート、障害発生時刻の状態)\n・INSERT中心なので同時更新の競合・ロック待ちが激減する\n・「集計し直したら数字が変わった」が起きず、レポートの再現性が保証される\n・注意: データ量は増える。読み取りには集計ビューやスナップショットを併用する",
+    langExamples: [
+      {
+        lang: "Rust",
+        code: `// Rustは束縛がデフォルトで不変(mutは明示)
+#[derive(Clone)]
+struct Deposit {
+    account_id: u64,
+    amount: i64,
+    deposited_at: String,
+}
+
+// イベントの列から状態を導出する(fold)
+fn balance(deposits: &[Deposit], withdrawals: &[i64]) -> i64 {
+    let in_total: i64 = deposits.iter()
+        .map(|d| d.amount)
+        .sum();
+    let out_total: i64 = withdrawals.iter().sum();
+    in_total - out_total
+}
+
+// 「事実の列は不変、状態は導出」という構造が
+// 所有権と不変性の言語仕様に自然に乗る`,
+      },
+      {
+        lang: "F#",
+        code: `// F#のレコードとリストはデフォルトで不変
+type Deposit = {
+    AccountId: int64
+    Amount: decimal
+    DepositedAt: System.DateTime
+}
+
+type Withdrawal = {
+    AccountId: int64
+    Amount: decimal
+    WithdrawnAt: System.DateTime
+}
+
+// 状態(残高)は事実の畳み込みで導出する
+let balance deposits withdrawals =
+    let inTotal = deposits |> List.sumBy (fun d -> d.Amount)
+    let outTotal = withdrawals |> List.sumBy (fun w -> w.Amount)
+    inTotal - outTotal
+
+// 「イベントは追記のみ・状態はfoldで導出」は
+// 関数型プログラミングの基本形そのもの`,
+      },
+      {
+        lang: "Kotlin",
+        code: `// data class + val で不変なイベントを表現
+data class Deposit(
+    val accountId: Long,
+    val amount: Long,
+    val depositedAt: Instant,
+)
+
+data class Withdrawal(
+    val accountId: Long,
+    val amount: Long,
+    val withdrawnAt: Instant,
+)
+
+// 状態は導出する(イベントは書き換えない)
+fun balance(
+    deposits: List<Deposit>,
+    withdrawals: List<Withdrawal>,
+): Long =
+    deposits.sumOf { it.amount } -
+        withdrawals.sumOf { it.amount }
+
+// 「ある時点の残高」も、日時でフィルタして
+// 同じ計算をするだけで再現できる`,
+      },
+      {
+        lang: "TypeScript",
+        code: `// readonlyで不変なイベントを表現
+type Deposit = {
+  readonly accountId: number;
+  readonly amount: number;
+  readonly depositedAt: string;
+};
+
+type Withdrawal = {
+  readonly accountId: number;
+  readonly amount: number;
+  readonly withdrawnAt: string;
+};
+
+// 状態は事実から導出する
+function balance(
+  deposits: readonly Deposit[],
+  withdrawals: readonly Withdrawal[],
+): number {
+  const inTotal = deposits.reduce((s, d) => s + d.amount, 0);
+  const outTotal = withdrawals.reduce((s, w) => s + w.amount, 0);
+  return inTotal - outTotal;
+}
+// 「先月末の残高」= 日時でfilterして同じreduceを回すだけ`,
+      },
+    ],
+    domain: {
+      text: "経済情報プラットフォームの「ウォッチリスト」を例に、上書き設計と事実積み上げ設計を比べます。分析チームの「解約予兆を知りたい」という要望に応えられるかが分かれ目になります。",
+      code: `── ❌ 上書き設計 ─────────────────────
+watch_list(user_id, company_code)
+-- 解除されたらDELETE。追加し直したらINSERT
+-- →「いつ登録した?」「何回解除した?」が消えている
+
+── ✅ 事実を積み上げる設計 ─────────────
+watch_added(user_id, company_code, added_at)
+watch_removed(user_id, company_code, removed_at)
+-- 現在のウォッチ銘柄 = 追加イベントのうち、
+-- それより後の解除イベントが無いもの
+
+── 1年後、分析チームからの要望に… ─────────
+「決算発表の直後に解除する従業員(アナリスト)が
+ 多い銘柄を知りたい。解約予兆の分析がしたい」
+
+上書き設計: 解除の記録が存在しない → 回答不能。
+            今からログを仕込んで1年待つしかない
+
+積み上げ設計: watch_removedと決算発表イベントを
+            突き合わせるSQLを書くだけ。過去分も全部ある
+
+── 教訓 ────────────────────────
+「あとで必要になる問い」は予測できない。
+事実を消さない設計は、未来の問いへの保険になる`,
+    },
+  },
+
+  "resource-event": {
+    title: "リソースとイベントの分類",
+    what: "イミュータブルデータモデルの出発点は、エンティティをリソース(資源)とイベント(出来事)に分類することです。見分ける基準は「いつ起きたかを表す日時属性を本質的に持つか」——注文・入金・約定は発生日時が本質なのでイベント、企業・従業員・銘柄は「存在するもの」なのでリソースです。さらに重要なルールが「1つのイベントが持つ日時属性は1つ」。注文テーブルに注文日時・出荷日時・請求日時があるなら、それは3つの出来事が混ざっている合図で、テーブルを分割します。",
+    apply: {
+      text: "複数の日時カラムを持つ「太った注文テーブル」を、出来事ごとのテーブルに分割します。",
+      code: `── ❌ 3つの出来事が1テーブルに混在 ────────
+CREATE TABLE orders (
+  order_id     BIGINT PRIMARY KEY,
+  customer_id  BIGINT,
+  ordered_at   TIMESTAMP,      -- 出来事1: 注文した
+  shipped_at   TIMESTAMP NULL, -- 出来事2: 出荷した
+  invoiced_at  TIMESTAMP NULL  -- 出来事3: 請求した
+);
+-- 出荷のたびにUPDATE。NULLだらけの中間状態。
+-- 「出荷を取り消して再出荷」の表現もできない
+
+── ✅ 1イベント1テーブル(日時は1つ)─────────
+CREATE TABLE orders (            -- 注文イベント
+  order_id    BIGINT PRIMARY KEY,
+  customer_id BIGINT NOT NULL,
+  ordered_at  TIMESTAMP NOT NULL
+);
+CREATE TABLE shipments (         -- 出荷イベント
+  shipment_id BIGINT PRIMARY KEY,
+  order_id    BIGINT NOT NULL REFERENCES orders,
+  shipped_at  TIMESTAMP NOT NULL
+);
+CREATE TABLE invoices (          -- 請求イベント
+  invoice_id  BIGINT PRIMARY KEY,
+  order_id    BIGINT NOT NULL REFERENCES orders,
+  invoiced_at TIMESTAMP NOT NULL
+);
+-- すべてINSERTのみ。NULLも消えた。
+-- 「未出荷の注文」= shipmentsに行が無い注文、と
+-- 状態はJOINで導出できる`,
+    },
+    benefits: "・UPDATEとNULLだらけの中間状態が構造的に消える\n・「未出荷」「請求済み」などの状態が、イベントの有無から導出できる(状態カラム不要)\n・出来事ごとにテーブルが分かれるので、業務フローの変更(例: 分割出荷)に強い\n・分類の議論を通じて、業務の理解そのものが深まる(モデリングが仕様の発見になる)",
+    langExamples: [
+      {
+        lang: "Rust",
+        code: `// リソースとイベントを型で区別する
+// リソース: 存在するもの(日時は本質でない)
+struct Company {
+    code: String,
+    name: String,
+}
+
+struct Employee {
+    id: u64,
+    name: String,
+}
+
+// イベント: 起きたこと(発生日時が本質・1つだけ)
+struct Order {
+    order_id: u64,
+    customer_id: u64,
+    ordered_at: String,   // このイベントの日時はこれだけ
+}
+
+struct Shipment {
+    shipment_id: u64,
+    order_id: u64,        // 注文イベントへの参照
+    shipped_at: String,
+}
+
+// 「未出荷の注文」は型の集合演算で導出する
+fn unshipped(orders: &[Order], shipments: &[Shipment]) -> Vec<&Order> {
+    orders.iter()
+        .filter(|o| !shipments.iter()
+            .any(|s| s.order_id == o.order_id))
+        .collect()
+}`,
+      },
+      {
+        lang: "F#",
+        code: `// 判別共用体でイベントの種類を型として列挙する
+type Resource =
+    | Company of code: string * name: string
+    | Employee of id: int64 * name: string
+
+// イベント: それぞれ日時属性を1つだけ持つ
+type Event =
+    | Ordered of orderId: int64 * at: System.DateTime
+    | Shipped of orderId: int64 * at: System.DateTime
+    | Invoiced of orderId: int64 * at: System.DateTime
+
+// 状態はイベント列から導出
+let isShipped orderId events =
+    events |> List.exists (function
+        | Shipped (id, _) when id = orderId -> true
+        | _ -> false)
+
+// 「出来事の種類を増やす」= DUにケースを足すだけ。
+// 網羅チェックが漏れた処理を教えてくれる`,
+      },
+      {
+        lang: "Kotlin",
+        code: `// sealed interfaceでイベントを型として表す
+// リソース
+data class Company(val code: String, val name: String)
+
+// イベント: 日時属性は各1つ
+sealed interface OrderEvent {
+    val orderId: Long
+}
+data class Ordered(
+    override val orderId: Long,
+    val customerId: Long,
+    val orderedAt: Instant,
+) : OrderEvent
+
+data class Shipped(
+    override val orderId: Long,
+    val shippedAt: Instant,
+) : OrderEvent
+
+// 状態の導出: 未出荷の注文
+fun unshipped(events: List<OrderEvent>): Set<Long> {
+    val ordered = events.filterIsInstance<Ordered>()
+        .map { it.orderId }.toSet()
+    val shipped = events.filterIsInstance<Shipped>()
+        .map { it.orderId }.toSet()
+    return ordered - shipped
+}`,
+      },
+      {
+        lang: "TypeScript",
+        code: `// リソースとイベントを型で区別する
+type Company = {
+  readonly code: string;
+  readonly name: string;
+};
+
+// イベント: 判別可能なユニオン+日時は各1つ
+type OrderEvent =
+  | { kind: "ordered"; orderId: number;
+      customerId: number; at: string }
+  | { kind: "shipped"; orderId: number; at: string }
+  | { kind: "invoiced"; orderId: number; at: string };
+
+// 状態はイベントから導出する
+function unshippedOrders(events: OrderEvent[]): number[] {
+  const ordered = events
+    .filter(e => e.kind === "ordered")
+    .map(e => e.orderId);
+  const shipped = new Set(
+    events.filter(e => e.kind === "shipped")
+          .map(e => e.orderId));
+  return ordered.filter(id => !shipped.has(id));
+}
+// 「状態カラム」は無い。事実の有無がそのまま状態になる`,
+      },
+    ],
+    domain: {
+      text: "経済情報プラットフォームのエンティティを、リソースとイベントに棚卸しした例です。分類してみると「1つの日時」ルールに違反していた既存テーブルも見つかります。",
+      code: `── 経済情報プラットフォームの分類 ──────────
+
+[リソース(存在するもの・名前を持つ)]
+  企業(code, name, industry)
+  銘柄(code, market, trading_unit)
+  従業員(id, name)※アナリスト・営業
+  部署(id, name)
+  顧客(id, name, plan)
+
+[イベント(起きたこと・日時を1つ持つ)]
+  決算発表(company_code, announced_at, 内容)
+  株の約定(銘柄, 数量, 価格, executed_at)
+  ウォッチ登録/解除(user, company, at)
+  従業員の入社(employee, joined_at)
+  従業員の異動(employee, 部署, transferred_at)
+  レポート公開(analyst, company, published_at)
+
+── 既存テーブルの「におい」の発見 ──────────
+契約テーブルに contracted_at / activated_at /
+cancelled_at の3つの日時カラムを発見
+→「契約した」「開通した」「解約した」という
+  3つのイベントが混ざっていた
+→ 分割すると「解約→再契約」も自然に表現でき、
+  cancelled_atのNULL意味論(未解約?データ欠損?)も消えた`,
+    },
+  },
+
+  "event-design": {
+    title: "イベント設計と訂正(赤黒処理)",
+    what: "イベントは「起きたこと」の記録なので、INSERTのみで積み上げ、後からUPDATE・DELETEしません。過去は変わらないからです。では間違えて記録したら?——元のイベントを残したまま、取消イベントと正しいイベントを追記します。会計の反対仕訳に由来する赤黒処理です。「間違えた」「取り消した」「記録し直した」のすべてが事実として残るため、監査証跡が完全に保たれます。イベントが不変であることは、集計の再現性(同じ期間を何度集計しても同じ結果)の土台でもあります。",
+    apply: {
+      text: "誤った入金記録を、UPDATEではなく取消+再記録の3レコードで訂正します。",
+      code: `── 誤記録: 30,000円の入金を 3,000円と記録 ────
+
+── ❌ UPDATEで直す ────────────────────
+UPDATE deposits SET amount = 30000 WHERE id = 101;
+-- 「間違いがあった」という事実が消える。
+-- 既に3,000円で締めた日次レポートとの食い違いも
+-- 追跡不能になる
+
+── ✅ 赤黒処理: 事実を3つ積む ─────────────
+-- 1. 元の記録(そのまま残す)
+--    id=101, amount=3000, at=7/10 10:00
+-- 2. 取消イベント(赤伝)
+INSERT INTO deposit_cancellations
+  (deposit_id, cancelled_at, reason, cancelled_by)
+VALUES
+  (101, '2026-07-11 09:00', '金額誤り', 'emp_042');
+-- 3. 正しい記録(黒伝)
+INSERT INTO deposits (id, amount, deposited_at)
+VALUES (102, 30000, '2026-07-10 10:00');
+
+── 効果 ─────────────────────────
+・7/10時点の集計は「3,000円」のまま再現できる
+  (当時のレポートと一致し、差異の説明もできる)
+・7/11以降の集計は取消を織り込み正しい値になる
+・「誰がいつなぜ訂正したか」が監査に耐える形で残る`,
+    },
+    benefits: "・監査証跡が完全に残り、金融・会計系の要件(誰がいつ何を訂正したか)に耐える\n・過去時点のレポートを「当時の数字のまま」再現でき、差異の原因も説明できる\n・訂正操作そのものを分析できる(誤記録が多い入力画面の発見など)\n・UPDATE権限を絞れるため、事故や不正によるデータ破壊のリスクが下がる",
+    langExamples: [
+      {
+        lang: "Rust",
+        code: `// イベントと取消を型で表し、集計時に相殺する
+enum LedgerEvent {
+    Deposit { id: u64, amount: i64 },
+    Cancellation { target_id: u64 },
+}
+
+fn effective_total(events: &[LedgerEvent]) -> i64 {
+    use LedgerEvent::*;
+    // 取消されたIDの集合を先に作る
+    let cancelled: std::collections::HashSet<u64> = events.iter()
+        .filter_map(|e| match e {
+            Cancellation { target_id } => Some(*target_id),
+            _ => None,
+        })
+        .collect();
+
+    events.iter()
+        .filter_map(|e| match e {
+            Deposit { id, amount }
+                if !cancelled.contains(id) => Some(*amount),
+            _ => None,
+        })
+        .sum()
+}
+// eventsは追記のみ。集計ロジックが取消を解釈する`,
+      },
+      {
+        lang: "F#",
+        code: `// 取消を含むイベント列の畳み込み
+type LedgerEvent =
+    | Deposit of id: int64 * amount: decimal
+    | Cancellation of targetId: int64
+
+let effectiveTotal events =
+    let cancelled =
+        events
+        |> List.choose (function
+            | Cancellation id -> Some id
+            | _ -> None)
+        |> Set.ofList
+
+    events
+    |> List.sumBy (function
+        | Deposit (id, amount)
+            when not (Set.contains id cancelled) -> amount
+        | _ -> 0m)
+
+// 「時点集計」も同じ関数にフィルタ済みリストを
+// 渡すだけ。イベントが不変だから結果も再現される`,
+      },
+      {
+        lang: "Kotlin",
+        code: `// 取消(赤)と再記録(黒)を含むイベントの集計
+sealed interface LedgerEvent
+data class Deposit(
+    val id: Long,
+    val amount: Long,
+    val at: Instant,
+) : LedgerEvent
+
+data class Cancellation(
+    val targetId: Long,
+    val at: Instant,
+    val reason: String,
+    val by: Long,          // 訂正した従業員ID(監査用)
+) : LedgerEvent
+
+fun effectiveTotal(events: List<LedgerEvent>): Long {
+    val cancelled = events
+        .filterIsInstance<Cancellation>()
+        .map { it.targetId }.toSet()
+    return events
+        .filterIsInstance<Deposit>()
+        .filter { it.id !in cancelled }
+        .sumOf { it.amount }
+}
+// asOf(時点)を引数に取る版も、atでフィルタするだけ`,
+      },
+      {
+        lang: "TypeScript",
+        code: `// 「当時の数字」と「訂正後の数字」を同じデータから出す
+type LedgerEvent =
+  | { kind: "deposit"; id: number; amount: number; at: string }
+  | { kind: "cancel"; targetId: number; at: string;
+      reason: string };
+
+function totalAsOf(events: LedgerEvent[], asOf: string): number {
+  // asOf時点までに存在したイベントだけで計算する
+  const visible = events.filter(e => e.at <= asOf);
+  const cancelled = new Set(
+    visible.filter(e => e.kind === "cancel")
+           .map(e => e.targetId));
+  return visible
+    .filter(e => e.kind === "deposit" && !cancelled.has(e.id))
+    .reduce((s, e) => s + (e as { amount: number }).amount, 0);
+}
+
+// totalAsOf(events, "2026-07-10T23:59") → 当時の3,000円
+// totalAsOf(events, "2026-07-12T00:00") → 訂正後の30,000円
+// どちらも「正しい」。事実が消えていないから両方答えられる`,
+      },
+    ],
+    domain: {
+      text: "証券の約定(株の売買成立)データでの赤黒処理の実例です。金融ドメインでは訂正の証跡が規制要件でもあり、イミュータブルな設計が実質的な標準になっています。",
+      code: `── シナリオ: 約定データの誤配信と訂正 ────────
+
+7/10 14:32 取引所から約定データを受信・記録
+  trade_id=T901, 銘柄=8001, 数量=100株, 価格=3,450円
+
+7/10 15:10 取引所から「価格誤配信」の訂正通知
+  正しくは 3,540円だった
+
+── 赤黒処理による訂正 ──────────────────
+INSERT INTO trade_cancellations
+  (trade_id, cancelled_at, source)
+VALUES ('T901', '2026-07-10 15:10', '取引所訂正通知');
+
+INSERT INTO trades
+  (trade_id, company_code, quantity, price, executed_at)
+VALUES ('T902', '8001', 100, 3540, '2026-07-10 14:32');
+-- 発生時刻は元の14:32のまま(事実)、
+-- 記録された時刻は別カラムで持つ(記録の事実)
+
+── これで答えられる問い ─────────────────
+・「14:40時点でポートフォリオ評価に使った価格は?」
+  → 3,450円(当時はそれが最新の事実だった)
+・「監査: この訂正は誰の指示で行われた?」
+  → 取消イベントのsource/操作者がそのまま証跡
+・「誤配信は月に何件起きている?」
+  → trade_cancellationsを数えるだけ(品質分析)`,
+    },
+  },
+
+  "resource-history": {
+    title: "リソースの変更履歴",
+    what: "リソース(企業・従業員など)は存在し続けますが、その属性——所属部署・給与・社名——は変化します。これをUPDATEで上書きすると過去が消えるため、変化する属性を本体から切り出して履歴テーブルにします。履歴の行は「従業員ID・部署ID・適用開始日(valid_from)」のような形で、変更のたびにINSERTします。「指定時点で有効な行」を特定できるので、『3年前の4月時点の所属』のような時点参照が素直なクエリで書けます。属性の変更頻度が異なるものは、履歴テーブルも分けるのがコツです。",
+    apply: {
+      text: "従業員テーブルの部署カラムを上書きする設計から、所属履歴テーブルへ切り出します。",
+      code: `── ❌ 上書き設計 ─────────────────────
+CREATE TABLE employees (
+  employee_id BIGINT PRIMARY KEY,
+  name        TEXT,
+  department  TEXT      -- 異動のたびにUPDATE
+);
+-- 「去年の4月、佐藤さんはどこの所属?」に答えられない
+-- 「異動が多い部署」の分析もできない
+
+── ✅ 変化する属性を履歴に切り出す ──────────
+CREATE TABLE employees (          -- リソース本体
+  employee_id BIGINT PRIMARY KEY,
+  name        TEXT NOT NULL      -- 滅多に変わらない属性のみ
+);
+CREATE TABLE department_assignments (  -- 所属履歴
+  employee_id BIGINT NOT NULL,
+  department  TEXT NOT NULL,
+  valid_from  DATE NOT NULL,     -- 適用開始日
+  PRIMARY KEY (employee_id, valid_from)
+);
+-- 異動 = INSERTするだけ
+INSERT INTO department_assignments
+VALUES (42, '調査部', '2026-04-01');
+
+-- 「2025-04-01時点の所属」を求めるクエリ
+SELECT department FROM department_assignments
+ WHERE employee_id = 42
+   AND valid_from <= '2025-04-01'
+ ORDER BY valid_from DESC
+ LIMIT 1;`,
+    },
+    benefits: "・「〜時点の状態」を正確に再現できる(過去のレポート・監査・分析の土台)\n・異動・改定そのものを分析できる(昇給の頻度、組織変更の影響など)\n・変更頻度の異なる属性を分けることで、本体テーブルが安定する\n・「未来の適用開始日」を先に入れておけば、予約(4月1日付の異動)も自然に表現できる",
+    langExamples: [
+      {
+        lang: "Rust",
+        code: `// 履歴から「時点の値」を導出する
+struct Assignment {
+    department: String,
+    valid_from: chrono::NaiveDate,
+}
+
+struct Employee {
+    name: String,
+    assignments: Vec<Assignment>, // 履歴を持つ(追記のみ)
+}
+
+impl Employee {
+    // 指定時点で有効な所属 = valid_fromが時点以前で最新のもの
+    fn department_as_of(
+        &self,
+        date: chrono::NaiveDate,
+    ) -> Option<&str> {
+        self.assignments.iter()
+            .filter(|a| a.valid_from <= date)
+            .max_by_key(|a| a.valid_from)
+            .map(|a| a.department.as_str())
+    }
+}
+// 「現在の所属」も department_as_of(today) で同じ扱い`,
+      },
+      {
+        lang: "F#",
+        code: `// 履歴リストと時点参照
+type Assignment = {
+    Department: string
+    ValidFrom: System.DateOnly
+}
+
+type Employee = {
+    Name: string
+    Assignments: Assignment list  // 追記のみの履歴
+}
+
+let departmentAsOf date employee =
+    employee.Assignments
+    |> List.filter (fun a -> a.ValidFrom <= date)
+    |> List.sortByDescending (fun a -> a.ValidFrom)
+    |> List.tryHead
+    |> Option.map (fun a -> a.Department)
+
+// 昇給履歴・等級履歴も同じパターン。
+// 「時点を引数に取る関数」に統一すると、
+// 現在も過去も同じコードで答えられる`,
+      },
+      {
+        lang: "Kotlin",
+        code: `// 履歴+時点参照のパターン
+data class Assignment(
+    val department: String,
+    val validFrom: LocalDate,
+)
+
+data class Employee(
+    val name: String,
+    val assignments: List<Assignment>,  // 追記のみ
+) {
+    fun departmentAsOf(date: LocalDate): String? =
+        assignments
+            .filter { it.validFrom <= date }
+            .maxByOrNull { it.validFrom }
+            ?.department
+
+    // 異動の「予約」も自然に表現できる:
+    // validFromが未来の行を入れておけば、
+    // その日が来ると自動的に有効になる
+    val currentDepartment: String?
+        get() = departmentAsOf(LocalDate.now())
+}`,
+      },
+      {
+        lang: "TypeScript",
+        code: `// 履歴から時点の値を導出する
+type Assignment = {
+  readonly department: string;
+  readonly validFrom: string;  // ISO日付
+};
+
+type Employee = {
+  readonly name: string;
+  readonly assignments: readonly Assignment[];
+};
+
+function departmentAsOf(
+  employee: Employee,
+  date: string,
+): string | undefined {
+  return employee.assignments
+    .filter(a => a.validFrom <= date)
+    .sort((a, b) => b.validFrom.localeCompare(a.validFrom))
+    [0]?.department;
+}
+
+// 現在の所属も過去の所属も同じ関数:
+// departmentAsOf(sato, "2025-04-01") → "営業部"
+// departmentAsOf(sato, today())      → "調査部"`,
+      },
+    ],
+    domain: {
+      text: "経済情報ドメインには履歴が本質的なデータが多くあります。「企業の社名変更」を例に、履歴設計が分析と表示の正しさを支える様子を見ます。",
+      code: `── 企業マスタと社名履歴 ──────────────────
+companies(company_id, founded_on)       -- 不変の本体
+company_names(                          -- 社名履歴
+  company_id, name, valid_from
+)
+-- 例: (1, "松下電器産業", 1935-…)
+--     (1, "パナソニック", 2008-10-01)
+
+── 履歴が効く場面 ────────────────────
+1. 過去レポートの正確な表示
+   「2007年のレポート」には当時の社名で表示すべき。
+   name_as_of(company_id, 2007-06-30) で正しく出せる
+
+2. ニュース記事の検索
+   旧社名で書かれた過去記事も、履歴を使えば
+   同じ企業に正しく紐づけられる
+
+3. 従業員(アナリスト)の担当履歴と組み合わせる
+   analyst_assignments(analyst_id, company_id, valid_from)
+   「このレポートを書いた当時の担当は誰か」を
+   公開日時点で正確に特定できる
+
+── ポイント ─────────────────────
+社名・所属・料金プランのような「変わるもの」は、
+最初から履歴として設計しておく。
+後から履歴化するのは、失われた過去を復元できない分
+ずっと高くつく`,
+    },
+  },
+
+  "logical-delete": {
+    title: "削除の扱い(論理削除を考え直す)",
+    what: "deleted_flagカラムによる論理削除は広く使われますが、問題の多い設計です。①全クエリに除外条件(WHERE deleted_flag = false)が必要で、書き忘れが即バグになる。②「いつ・誰が・なぜ削除したか」という事実を記録できない。③ユニーク制約が壊れる(削除済みと同じメールアドレスで再登録できない等)。イミュータブルデータモデルの答えは「削除も1つの出来事」——退会・解約・取消といったイベントとして記録するか、削除済みデータを別テーブルへ移動します。「削除」という言葉の裏にある業務上の意味(退会?誤登録の取消?アーカイブ?)を見極めることが設計の入口です。",
+    apply: {
+      text: "deleted_flagを、「退会イベント」の記録に置き換えます。",
+      code: `── ❌ deleted_flagによる論理削除 ──────────
+CREATE TABLE customers (
+  customer_id  BIGINT PRIMARY KEY,
+  email        TEXT UNIQUE,
+  deleted_flag BOOLEAN DEFAULT false  -- 退会でtrueに
+);
+-- 問題1: 全クエリに WHERE deleted_flag = false が必要
+--   (JOINの相手も含めて。1箇所忘れたら退会者にメール送信…)
+-- 問題2: いつ・なぜ退会したかが残らない
+-- 問題3: UNIQUE(email)のせいで、退会者と同じ
+--   メールアドレスでの再登録がエラーになる
+
+── ✅ 退会を「出来事」として記録する ──────────
+CREATE TABLE customers (
+  customer_id BIGINT PRIMARY KEY,
+  email       TEXT NOT NULL
+);
+CREATE TABLE customer_withdrawals (   -- 退会イベント
+  customer_id  BIGINT PRIMARY KEY REFERENCES customers,
+  withdrawn_at TIMESTAMP NOT NULL,
+  reason       TEXT
+);
+-- 有効な顧客だけのビューを1度だけ定義する
+CREATE VIEW active_customers AS
+SELECT c.* FROM customers c
+ WHERE NOT EXISTS (SELECT 1 FROM customer_withdrawals w
+                    WHERE w.customer_id = c.customer_id);
+-- アプリは active_customers を使う。除外条件の
+-- 書き忘れという事故がビューの内側に封じ込められる`,
+    },
+    benefits: "・「削除済みの除外し忘れ」というバグの温床が、ビュー/型の内側に封じ込められる\n・いつ・誰が・なぜ削除したかが記録され、解約分析や誤操作の調査ができる\n・退会→再入会のような業務フローを自然に表現できる(フラグでは無理が出る)\n・「削除」の業務的な意味(取消・退会・アーカイブ)を区別して設計できる",
+    langExamples: [
+      {
+        lang: "Rust",
+        code: `// フラグではなく型で「状態」を表現する
+struct Customer {
+    id: u64,
+    email: String,
+}
+
+struct Withdrawal {
+    customer_id: u64,
+    withdrawn_at: String,
+    reason: String,
+}
+
+// 「有効な顧客」を型レベルで区別する
+struct ActiveCustomer(Customer);   // ニュータイプ
+
+fn active_customers(
+    customers: Vec<Customer>,
+    withdrawals: &[Withdrawal],
+) -> Vec<ActiveCustomer> {
+    let withdrawn: std::collections::HashSet<u64> =
+        withdrawals.iter().map(|w| w.customer_id).collect();
+    customers.into_iter()
+        .filter(|c| !withdrawn.contains(&c.id))
+        .map(ActiveCustomer)
+        .collect()
+}
+// メール送信APIの引数を ActiveCustomer にすれば、
+// 「退会者に送ってしまう」ミスはコンパイルエラーになる`,
+      },
+      {
+        lang: "F#",
+        code: `// 判別共用体で顧客の状態を型にする
+type Customer = { Id: int64; Email: string }
+
+type CustomerState =
+    | Active of Customer
+    | Withdrawn of Customer * at: System.DateTime * reason: string
+
+// booleanフラグと違い、Withdrawnには
+// 「いつ・なぜ」が必ず付いてくる(付け忘れられない)
+
+let sendCampaignMail state =
+    match state with
+    | Active c -> sendMail c.Email
+    | Withdrawn _ -> ()  // 網羅チェックが「退会者の
+                         // 考慮漏れ」を防いでくれる
+
+// deleted_flagの世界では「flagの見忘れ」は実行時バグ。
+// 型の世界では、考慮しないとコンパイルが通らない`,
+      },
+      {
+        lang: "Kotlin",
+        code: `// sealed classで「削除済み」を明示的な状態にする
+data class Customer(val id: Long, val email: String)
+
+sealed interface CustomerState {
+    data class Active(val customer: Customer) : CustomerState
+    data class Withdrawn(
+        val customer: Customer,
+        val withdrawnAt: Instant,
+        val reason: String,
+    ) : CustomerState
+}
+
+fun notifyEarnings(state: CustomerState, msg: String) =
+    when (state) {   // whenの網羅性チェックが効く
+        is CustomerState.Active ->
+            mailer.send(state.customer.email, msg)
+        is CustomerState.Withdrawn -> Unit  // 送らない
+    }
+
+// 「flag=trueの行にメールを送ってしまった」という
+// 論理削除の典型事故が、型で構造的に防がれる`,
+      },
+      {
+        lang: "TypeScript",
+        code: `// 判別可能ユニオンで状態を型にする
+type Customer = {
+  readonly id: number;
+  readonly email: string;
+};
+
+type CustomerState =
+  | { kind: "active"; customer: Customer }
+  | { kind: "withdrawn"; customer: Customer;
+      withdrawnAt: string; reason: string };
+
+function notifyEarnings(state: CustomerState, msg: string) {
+  switch (state.kind) {
+    case "active":
+      mailer.send(state.customer.email, msg);
+      break;
+    case "withdrawn":
+      break; // 退会者には送らない(考慮が強制される)
+    default: {
+      // 網羅性チェック: 新しい状態を追加すると
+      // ここがコンパイルエラーになって教えてくれる
+      const _exhaustive: never = state;
+    }
+  }
+}`,
+      },
+    ],
+    domain: {
+      text: "経済情報プラットフォームでの「削除」の棚卸しです。ひとくちに削除といっても業務上の意味は様々で、それぞれ適切な表現が違います。",
+      code: `── 「削除」の正体を見極める ────────────────
+
+1. 顧客の「退会」
+   正体: ライフサイクル上の出来事
+   設計: customer_withdrawals イベント
+        (いつ・なぜ → 解約分析にも使える)
+
+2. ウォッチリストからの「削除」
+   正体: 興味の変化という出来事
+   設計: watch_removed イベント
+        (決算直後の解除傾向、といった分析が可能に)
+
+3. 従業員(アナリスト)の「退職」
+   正体: 雇用終了という出来事
+   設計: employment_ended イベント
+        過去に書いたレポートの署名は残す
+        (物理削除すると過去レポートが壊れる)
+
+4. 誤登録した企業データの「削除」
+   正体: 誤りの訂正
+   設計: 赤黒処理(取消イベント+正しい登録)
+
+5. 古いニュース記事の「削除」
+   正体: アーカイブ(保管期限・コスト管理)
+   設計: アーカイブテーブル/ストレージへの移動
+        (これは本当に「移動」でよい)
+
+── 教訓 ─────────────────────────
+「deleted_flagを1本立てる」前に、
+その削除がどの出来事なのかを業務に問う。
+答えがそのままテーブル設計になる`,
+    },
+  },
+
+  "immutability-in-code": {
+    title: "コードの不変性とイベントソーシング",
+    what: "イミュータブルデータモデルの思想は、プログラミングの不変性とひと続きです。不変オブジェクトは生成後に状態が変わらないため、どこへ渡しても書き換えられる心配がなく、並行処理でもロックなしで共有できます。「変更」は、元を変えずに一部を差し替えた新しい値を作ることで表現します(レコードのwith式、data classのcopy、スプレッド構文)。この発想を永続化まで徹底したのがイベントソーシング——状態ではなく「状態を変えた出来事の列」を保存し、リプレイ(畳み込み)で現在の状態を導出するアーキテクチャです。",
+    apply: {
+      text: "可変オブジェクトの事故と、不変スタイルによる解決、そしてイベントソーシングへの接続です。",
+      code: `── ❌ 可変オブジェクトの典型事故 ─────────
+const portfolio = { total: 1000000, positions: [...] };
+renderChart(portfolio);       // 描画に渡した
+recalculate(portfolio);       // 別の処理が中身を書き換えた
+// → チャートと数値表示が別の値になる(いつの間にか)
+
+── ✅ 不変スタイル: 変更=新しい値を作る ───────
+const updated = {
+  ...portfolio,               // 元はそのまま
+  total: portfolio.total + delta,
+};
+// portfolioを見ている画面は影響を受けない。
+// 「変更前」と「変更後」を並べて比較もできる
+
+── イベントソーシングへの接続 ─────────────
+// 状態を保存する代わりに、出来事を保存する
+const events = [
+  { kind: "bought", code: "8001", qty: 100, at: "..." },
+  { kind: "bought", code: "6501", qty: 200, at: "..." },
+  { kind: "sold",   code: "8001", qty: 50,  at: "..." },
+];
+// 現在の状態はリプレイ(畳み込み)で導出
+const holdings = events.reduce(applyEvent, emptyHoldings);
+// 過去の任意時点も、そこまでのイベントで同じ計算を
+// するだけ。「DBのイベントテーブル」と「コードのreduce」が
+// 同じ思想の両面であることが分かる`,
+    },
+    benefits: "・「いつの間にか値が変わっていた」系のバグの根が絶たれる\n・並行処理でロックが不要になり、設計が単純になる\n・変更前後の値を保持できるので、差分表示・Undo・タイムトラベルデバッグが作りやすい\n・イベントソーシングまで徹底すれば、監査証跡と任意時点の状態復元がアーキテクチャの性質になる",
+    langExamples: [
+      {
+        lang: "Rust",
+        code: `// Rustは不変がデフォルト。「変更」は新しい値を作る
+#[derive(Clone)]
+struct Position {
+    code: String,
+    quantity: u32,
+}
+
+impl Position {
+    // struct update構文で一部だけ差し替えた新しい値を返す
+    fn with_quantity(&self, quantity: u32) -> Self {
+        Self {
+            quantity,
+            ..self.clone()
+        }
+    }
+}
+
+let p1 = Position { code: "8001".into(), quantity: 100 };
+let p2 = p1.with_quantity(150);
+// p1は変わらない。しかも所有権システムが
+// 「共有しながらの書き換え」をコンパイル時に禁止する
+// (&mutは同時に1つだけ)——不変性の言語レベル保証`,
+      },
+      {
+        lang: "F#",
+        code: `// F#は不変がデフォルト。with式とfoldが基本装備
+type Position = { Code: string; Quantity: int }
+
+let p1 = { Code = "8001"; Quantity = 100 }
+let p2 = { p1 with Quantity = 150 }   // 新しい値を作る
+// p1は変わらない
+
+// イベントソーシングの核はただのfold
+type TradeEvent =
+    | Bought of code: string * qty: int
+    | Sold of code: string * qty: int
+
+let apply holdings event =
+    match event with
+    | Bought (code, qty) ->
+        holdings |> Map.change code (fun v ->
+            Some (defaultArg v 0 + qty))
+    | Sold (code, qty) ->
+        holdings |> Map.change code (fun v ->
+            Some (defaultArg v 0 - qty))
+
+let current = events |> List.fold apply Map.empty
+// 任意時点の状態 = そこまでのイベントで同じfold`,
+      },
+      {
+        lang: "Kotlin",
+        code: `// data classのcopyで不変スタイル
+data class Position(val code: String, val quantity: Int)
+
+val p1 = Position("8001", 100)
+val p2 = p1.copy(quantity = 150)   // 新しい値を作る
+// p1は変わらない
+
+// イベントのリプレイで状態を導出
+sealed interface TradeEvent
+data class Bought(val code: String, val qty: Int) : TradeEvent
+data class Sold(val code: String, val qty: Int) : TradeEvent
+
+fun replay(events: List<TradeEvent>): Map<String, Int> =
+    events.fold(emptyMap()) { holdings, e ->
+        when (e) {
+            is Bought -> holdings +
+                (e.code to (holdings[e.code] ?: 0) + e.qty)
+            is Sold -> holdings +
+                (e.code to (holdings[e.code] ?: 0) - e.qty)
+        }
+    }
+// listOfやMapも読み取り専用インターフェースが
+// 基本なのがKotlinの設計思想`,
+      },
+      {
+        lang: "TypeScript",
+        code: `// readonly + スプレッド構文で不変スタイル
+type Position = {
+  readonly code: string;
+  readonly quantity: number;
+};
+
+const p1: Position = { code: "8001", quantity: 100 };
+const p2: Position = { ...p1, quantity: 150 }; // 新しい値
+// p1.quantity = 150 はコンパイルエラー
+
+// イベントのリプレイ(reduce)で状態を導出
+type TradeEvent =
+  | { kind: "bought"; code: string; qty: number }
+  | { kind: "sold"; code: string; qty: number };
+
+function replay(events: TradeEvent[]): Record<string, number> {
+  return events.reduce((holdings, e) => ({
+    ...holdings,
+    [e.code]:
+      (holdings[e.code] ?? 0) +
+      (e.kind === "bought" ? e.qty : -e.qty),
+  }), {} as Record<string, number>);
+}
+// ReactのsetStateが「新しいオブジェクトを渡す」流儀
+// なのも同じ思想——不変だから変更検知が===で済む`,
+      },
+    ],
+    domain: {
+      text: "ポートフォリオ管理を「イベントの列+リプレイ」で組んだときに、経済情報ドメインで何が嬉しいかの実例です。DB設計(イミュータブルデータモデル)とコード設計(不変+fold)が同じ思想で貫かれます。",
+      code: `── ポートフォリオをイベントソーシングで ─────────
+
+保存するもの: 出来事だけ(すべて不変)
+  bought(8001, 100株, 3450円, 7/01 09:15, by佐藤)
+  bought(6501, 200株, 1820円, 7/03 10:02, by佐藤)
+  sold  (8001,  50株, 3600円, 7/10 14:30, by鈴木)
+
+導出するもの: 状態はいつでも計算できる
+  現在の保有   = 全イベントをreplay
+  7/5時点の保有 = 7/5までのイベントをreplay
+
+── ドメインでの効能 ──────────────────
+1. 監査(金融の規制要件)
+   「誰がいつ何を売買したか」がデータの一次形式。
+   別途ログを取る必要がない
+
+2. 損益の説明可能性
+   「今月の損益+120万円の内訳は?」
+   → イベントを分類・集計するだけで根拠を提示できる
+
+3. 「あの日の状態」の完全再現
+   顧客からの「7/5の評価額がおかしい」という
+   問い合わせに、当時の保有と当時の株価で
+   その場で再計算して回答できる
+
+4. 集計ロジックの安全な進化
+   評価方法(平均取得単価の計算など)を変えても、
+   イベントは不変なので、新旧ロジックを
+   同じデータに並走させて差分を検証できる`,
     },
   },
 };
