@@ -135,6 +135,27 @@ const QUIZ_CONCEPT_GROUPS = {
       },
     ],
   },
+  "frontend-architecture": {
+    intro:
+      "フロントエンドは「見た目・状態・データ取得・ルーティング」が絡み合いやすい場所です。関心を分離して変更に強い構造を作るのがフロントエンドアーキテクチャの仕事です。コンポーネント設計と状態管理を土台に、レンダリング戦略・API層・パフォーマンスまでを学びます。",
+    groups: [
+      {
+        name: "全体像",
+        description: "フロントエンドアーキテクチャの目的とSPAの基本",
+        concepts: ["frontend-arch-overview"],
+      },
+      {
+        name: "部品と状態",
+        description: "コンポーネントの切り方と、状態の置き場所",
+        concepts: ["component-design", "state-management"],
+      },
+      {
+        name: "配信と性能",
+        description: "HTMLをどう届け、どう速く保つか",
+        concepts: ["rendering-strategies", "api-layer", "frontend-performance"],
+      },
+    ],
+  },
 };
 
 const QUIZ_CONCEPTS = {
@@ -6456,6 +6477,992 @@ await fetch("http://price-service/prices/" + code, {
    → 次からはユーザーの報告より先に気づける
 
 障害対応の速さは、可観測性への事前投資で決まる`,
+    },
+  },
+
+  // ===================================================
+  // フロントエンドアーキテクチャ
+  // ===================================================
+  "frontend-arch-overview": {
+    title: "フロントエンドアーキテクチャ(全体像)",
+    what: "フロントエンドアーキテクチャの目的は、画面に絡み合いがちな複数の関心——見た目(UI)・状態・データ取得・ルーティング——を分離し、変更・テスト・分業がしやすい構造を作ることです。土台となるのがSPA(Single Page Application)——初回ロード後はJavaScriptが画面を書き換えて遷移する構成——と、宣言的UI——「状態が画面を決める(UI = f(state))」という考え方です。SOLIDやクリーンアーキテクチャの原則は、フロントエンドでもそのまま生きています。",
+    apply: {
+      text: "API呼び出し・ロジック・表示が混在した巨大コンポーネントを、関心ごとの層に分離します。",
+      code: `── ❌ 全部入りコンポーネント ─────────────
+function CompanyPage() {
+  // データ取得もここ
+  useEffect(() => { fetch("/api/companies/8001")... }, []);
+  // 業務ロジックもここ
+  const per = marketCap / netIncome;
+  // 表示もここ(300行のJSX)
+  return <div>...</div>;
+}
+// デザイン変更もAPI変更もロジック変更も
+// 全部このファイルに波及する
+
+── ✅ 関心ごとに分離 ──────────────────
+// [API層] 通信の詳細を隠す
+const companyApi = {
+  fetch: (code) => http.get("/api/companies/" + code),
+};
+// [ロジック] 純粋な関数(UIと無関係にテスト可能)
+const calcPer = (c) => c.marketCap / c.netIncome;
+// [状態] カスタムフックに集約
+function useCompany(code) {
+  /* companyApiを呼び、状態を管理 */
+}
+// [表示] propsを描くだけの純粋な部品
+function CompanyCard({ name, per }) {
+  return <article>{name} PER: {per}</article>;
+}
+// 組み立て
+function CompanyPage() {
+  const company = useCompany("8001");
+  return <CompanyCard name={company.name}
+                      per={calcPer(company)} />;
+}`,
+    },
+    benefits: "・デザイン変更は表示層だけ、API変更はAPI層だけ、と修正範囲が予測できる\n・ロジックが純粋関数になり、ブラウザなしの高速なテストで検証できる\n・表示部品はStorybookなどでカタログ化でき、デザイナーとの分業が進む\n・「状態が画面を決める」構造により、不具合の再現が「状態の再現」に帰着する",
+    langExamples: [
+      {
+        lang: "Rust",
+        code: `// Leptos(Rust製のWASMフレームワーク)の
+// 宣言的UI: シグナルが変わると表示が追従する
+use leptos::*;
+
+#[component]
+fn CompanyCard(name: String, price: ReadSignal<f64>) -> impl IntoView {
+    view! {
+        <article class="card">
+            <h2>{name}</h2>
+            // priceシグナルの変化が自動で表示に反映
+            <p>"株価: " {move || price.get()} "円"</p>
+        </article>
+    }
+}
+
+// Rustの型検査がpropsの受け渡しにも効くため、
+// 「存在しないpropsを渡す」類のバグはコンパイル時に消える`,
+      },
+      {
+        lang: "F#",
+        code: `// Fable + Elmish: F#をJSにコンパイルし、
+// Elmアーキテクチャ(MVU)でUIを組む
+type Model = { CompanyName: string; Price: float }
+
+type Msg =
+    | PriceUpdated of float
+
+// update: 状態遷移が1つの純粋関数に集約される
+let update msg model =
+    match msg with
+    | PriceUpdated p -> { model with Price = p }
+
+// view: 状態を受け取って画面を返す純粋な関数
+let view model dispatch =
+    Html.article [
+        Html.h2 [ prop.text model.CompanyName ]
+        Html.p [ prop.text $"株価: {model.Price}円" ]
+    ]
+// UI = f(state) を最も純粋に体現したアーキテクチャ`,
+      },
+      {
+        lang: "Kotlin",
+        code: `// Jetpack Compose: Kotlinの宣言的UI
+// (Compose MultiplatformでデスクトップやWebにも展開可能)
+@Composable
+fun CompanyCard(name: String, price: Double) {
+    Card {
+        Column(Modifier.padding(16.dp)) {
+            Text(name, style = MaterialTheme.typography.titleLarge)
+            Text("株価: $price 円")
+        }
+    }
+}
+
+@Composable
+fun CompanyScreen(viewModel: CompanyViewModel) {
+    // 状態が変わると必要な部分だけ再コンポーズされる
+    val state by viewModel.uiState.collectAsState()
+    CompanyCard(state.name, state.price)
+}
+// 状態はViewModelに、表示はComposableに、と関心を分離`,
+      },
+      {
+        lang: "TypeScript",
+        code: `// React: 宣言的UIの代表格
+// UI = f(state) — 状態が画面を決める
+type Props = { name: string; price: number };
+
+// 表示: propsを描くだけの純粋な部品
+function CompanyCard({ name, price }: Props) {
+  return (
+    <article className="card">
+      <h2>{name}</h2>
+      <p>株価: {price.toLocaleString()}円</p>
+    </article>
+  );
+}
+
+// 状態: 変更はsetStateを通じてのみ(単方向)
+function CompanyScreen() {
+  const [price, setPrice] = useState(3450);
+  useEffect(() => subscribePrice("8001", setPrice), []);
+  return <CompanyCard name="アクメ商事" price={price} />;
+}`,
+      },
+    ],
+    domain: {
+      text: "経済情報ダッシュボードのフロントエンドを層で整理した全体像です。各層の担当が明確なので、「株価APIの仕様変更」「チャートのデザイン刷新」がそれぞれ1つの層で完結します。",
+      code: `── 経済情報ダッシュボードの構造 ──────────
+
+[表示層] 純粋なUI部品(propsを描くだけ)
+  CompanyCard / PriceChart / WatchListTable
+  EmployeeBadge(担当アナリスト表示)
+
+[状態層] 画面の状態と操作
+  useCompany(code)     … 企業情報の取得と保持
+  useWatchList(userId) … ウォッチリストの追加・削除
+  useStockPrice(code)  … 株価の購読(WebSocket)
+
+[ロジック層] 純粋な計算(UIと独立にテスト)
+  calcPer / calcDividendYield / formatJpy
+
+[API層] 通信の詳細を隠す(エンドポイント・認証)
+  companyApi / priceApi / watchListApi
+
+── 変更シナリオと影響範囲 ─────────────
+・「PERの計算式を修正」→ ロジック層の1関数+そのテスト
+・「株価APIがv2に」→ API層のpriceApiだけ
+・「カードのデザイン刷新」→ 表示層のCompanyCardだけ
+・「ウォッチ上限を10社に」→ 状態層のuseWatchListだけ
+関心が分離されていれば、影響範囲は常に1層に閉じる`,
+    },
+  },
+
+  "component-design": {
+    title: "コンポーネント設計",
+    what: "コンポーネントは「UIの部品」であり、設計の基本はオブジェクト指向と同じです——単一責任(1部品1役割)、カプセル化(入力はprops、出力はイベントに限定)、再利用性(特定の画面・状態管理に依存しない)。代表的な整理法がPresentational / Containerの分離で、「見た目だけの部品」と「データ取得・状態を扱う部品」を分けます。また、深い階層へpropsを中継し続けるprop drilling(バケツリレー)は、コンテキストやコンポーネント合成で解消します。",
+    apply: {
+      text: "データ取得と表示が一体化したコンポーネントを、Container(ロジック)とPresentational(表示)に分離します。",
+      code: `── ❌ 取得と表示が一体 ─────────────────
+function WatchList() {
+  const [items, setItems] = useState([]);
+  useEffect(() => {
+    fetch("/api/watchlist").then(/* ... */);
+  }, []);
+  return <ul>{items.map(/* 描画 */)}</ul>;
+}
+// この見た目を「検索結果画面」でも使いたいが、
+// APIが固定されていて再利用できない
+
+── ✅ Presentational / Container分離 ──────
+// 表示だけの部品: どこから来たデータかを知らない
+function CompanyList({ companies, onSelect }) {
+  return (
+    <ul>
+      {companies.map(c => (
+        <li key={c.code} onClick={() => onSelect(c)}>
+          {c.name}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+// Container: データの出どころを知っている側
+function WatchListContainer() {
+  const companies = useWatchList();   // ウォッチリスト由来
+  return <CompanyList companies={companies}
+                      onSelect={openDetail} />;
+}
+function SearchResultContainer() {
+  const companies = useSearchResult(); // 検索結果由来
+  return <CompanyList companies={companies}
+                      onSelect={openDetail} />;
+}
+// 同じ見た目を、異なるデータ源で再利用できた`,
+    },
+    benefits: "・表示部品が純粋になり、Storybookでのカタログ化・ビジュアルテストができる\n・同じ見た目を複数のデータ源で再利用できる\n・「見た目のバグ」と「データのバグ」の切り分けが簡単になる\n・propsとイベントという契約が明確なので、チームで部品を分担開発できる",
+    langExamples: [
+      {
+        lang: "Rust",
+        code: `// Leptos: 表示部品はpropsとコールバックだけに依存
+#[component]
+fn CompanyList(
+    companies: Vec<Company>,
+    on_select: Callback<Company>,   // 出力はイベント
+) -> impl IntoView {
+    view! {
+        <ul>
+            {companies.into_iter().map(|c| {
+                let on_select = on_select.clone();
+                let c2 = c.clone();
+                view! {
+                    <li on:click=move |_| on_select.call(c2.clone())>
+                        {c.name.clone()}
+                    </li>
+                }
+            }).collect_view()}
+        </ul>
+    }
+}
+// この部品はAPIもグローバル状態も知らないので、
+// ウォッチリストにも検索結果にも使い回せる`,
+      },
+      {
+        lang: "F#",
+        code: `// Elmish: 子コンポーネントは「状態の断片」と
+// 「メッセージの発行先」だけを受け取る
+type Company = { Code: string; Name: string }
+
+// 表示だけの関数: どの画面のデータかを知らない
+let companyList (companies: Company list)
+                (onSelect: Company -> unit) =
+    Html.ul [
+        for c in companies ->
+            Html.li [
+                prop.text c.Name
+                prop.onClick (fun _ -> onSelect c)
+            ]
+    ]
+
+// 親側: ウォッチリスト画面でも検索画面でも
+// 同じcompanyListを異なるデータで呼ぶだけ
+let view model dispatch =
+    companyList model.WatchedCompanies
+                (fun c -> dispatch (CompanySelected c))`,
+      },
+      {
+        lang: "Kotlin",
+        code: `// Compose: 状態ホイスティング
+// 状態は持たず、値とイベントを受け取る「制御された部品」
+@Composable
+fun CompanyList(
+    companies: List<Company>,
+    onSelect: (Company) -> Unit,   // 出力はイベント
+) {
+    LazyColumn {
+        items(companies, key = { it.code }) { company ->
+            ListItem(
+                headlineContent = { Text(company.name) },
+                modifier = Modifier.clickable {
+                    onSelect(company)
+                },
+            )
+        }
+    }
+}
+// 状態を親に「持ち上げる」(hoist)ことで、
+// この部品はプレビューもテストも単体で可能になる`,
+      },
+      {
+        lang: "TypeScript",
+        code: `// React: propsとイベントに限定した表示部品
+type Company = { code: string; name: string };
+
+type Props = {
+  companies: Company[];
+  onSelect: (c: Company) => void;   // 出力はイベント
+};
+
+export function CompanyList({ companies, onSelect }: Props) {
+  return (
+    <ul>
+      {companies.map(c => (
+        <li key={c.code} onClick={() => onSelect(c)}>
+          {c.name}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+// prop drilling対策の例: 中継が深くなるなら
+// コンテキストで「必要な場所が直接受け取る」形に
+const CurrentUserContext = createContext<Employee | null>(null);
+const user = useContext(CurrentUserContext); // 深い階層から直接`,
+      },
+    ],
+    domain: {
+      text: "経済情報ダッシュボードの部品カタログの例です。汎用部品→ドメイン部品→画面、と粒度を分けて組み立てると、再利用と分業が進みます。",
+      code: `── 部品の粒度を3段階で整理 ─────────────
+
+[汎用UI部品] ドメインを知らない(どのアプリでも使える)
+  Button / Card / Table / Modal / Sparkline
+
+[ドメイン部品] 企業・株価・従業員の概念を知っている
+  CompanyCard(企業カード)
+    props: { name, industry, marketCap }
+  PriceChangeBadge(前日比バッジ)
+    props: { rate }  // +2.3%なら緑、-なら赤
+  AnalystAvatar(担当アナリスト=従業員の表示)
+    props: { employee: { name, department } }
+  EarningsTable(決算テーブル)
+
+[画面] ドメイン部品を配線する(Container)
+  WatchListPage = useWatchList()
+    + CompanyCard × n + PriceChangeBadge
+  CompanyDetailPage = useCompany(code)
+    + EarningsTable + AnalystAvatar
+
+── 効果 ────────────────────────
+・PriceChangeBadgeの色ルール変更は1部品で完結し、
+  ウォッチリストにも検索にも詳細画面にも一括反映
+・新画面「業種別ランキング」は既存部品の
+  組み合わせだけで1日で完成`,
+    },
+  },
+
+  "state-management": {
+    title: "状態管理",
+    what: "状態管理の第一歩は「状態を分類する」ことです。①ローカル状態(モーダル開閉など、1部品で完結)、②共有状態(ログインユーザーなど、複数画面で参照)、③サーバー状態(APIから取得したデータ。他者が更新する・古くなる・キャッシュや再取得が必要)。この3つは性質が違うため、同じ道具で扱うと破綻します。原則は、単方向データフロー(状態→表示→イベント→状態更新の一方向)と、コロケーション(状態は使う場所の最も近くに置く)です。",
+    apply: {
+      text: "「とりあえず全部グローバルストア」をやめ、状態を性質ごとに適切な場所へ移します。",
+      code: `── ❌ すべてグローバルストアに ───────────
+globalStore = {
+  isMenuOpen: false,        // 1部品しか使わないのに
+  searchKeyword: "",        // 検索画面だけの状態なのに
+  companies: [...],         // サーバー由来なのに手動管理
+  user: {...},
+}
+// どこからでも書き換えられ、変更経路が追えない。
+// メニュー開閉で無関係な画面まで再レンダリング
+
+── ✅ 性質ごとに置き場所を変える ───────────
+// ① ローカル状態: 使う部品の中に置く(コロケーション)
+function Menu() {
+  const [isOpen, setIsOpen] = useState(false);
+  /* ... */
+}
+
+// ② 共有状態: 本当に共有が必要なものだけ昇格
+const UserContext = createContext<Employee | null>(null);
+
+// ③ サーバー状態: 専用の仕組みに任せる
+//    (キャッシュ・再取得・ローディング状態を宣言的に)
+const { data: companies, isLoading } = useQuery({
+  queryKey: ["companies", industry],
+  queryFn: () => companyApi.list(industry),
+  staleTime: 60_000,   // 1分は新鮮とみなす
+});
+// 「いつ再取得するか」「古いデータをどう見せるか」を
+// 手書きのフラグ管理からライブラリの宣言に置き換える`,
+    },
+    benefits: "・「この状態はどこで変わったのか」が追跡可能になり、デバッグが速くなる\n・状態の置き場所が適切だと、再レンダリングの範囲が自然と最小になる\n・サーバー状態を専用の道具に任せると、ローディング・エラー・キャッシュの手書き管理が消える\n・状態の分類を通じて「本当にグローバルが必要なもの」が驚くほど少ないと分かる",
+    langExamples: [
+      {
+        lang: "Rust",
+        code: `// Leptos: シグナルによるリアクティブな状態管理
+#[component]
+fn PriceBoard() -> impl IntoView {
+    // ローカル状態: この部品の中だけのシグナル
+    let (filter, set_filter) = create_signal(String::new());
+
+    // サーバー状態: Resourceが取得・再取得を管理
+    let companies = create_resource(
+        move || filter.get(),           // 依存が変わると
+        |f| async move { fetch_companies(f).await }, // 再取得
+    );
+
+    view! {
+        <input on:input=move |e| {
+            set_filter.set(event_target_value(&e));
+        }/>
+        <Suspense fallback=|| view! { "読み込み中…" }>
+            {move || companies.get().map(render_list)}
+        </Suspense>
+    }
+}
+// 依存を宣言すれば更新の伝播はフレームワークが担う`,
+      },
+      {
+        lang: "F#",
+        code: `// Elmish(MVU): 状態遷移が1箇所に集まる究極の単方向
+type Model = {
+    Keyword: string                    // ローカルな入力状態
+    Companies: Deferred<Company list>  // サーバー状態
+}                                      // (未取得/取得中/取得済)
+
+type Msg =
+    | KeywordChanged of string
+    | CompaniesLoaded of Company list
+    | LoadFailed of string
+
+let update msg model =
+    match msg with
+    | KeywordChanged k ->
+        { model with Keyword = k },
+        Cmd.ofEffect (fetchCompanies k)   // 副作用も宣言的
+    | CompaniesLoaded cs ->
+        { model with Companies = Resolved cs }, Cmd.none
+    | LoadFailed e -> (* ... *) model, Cmd.none
+
+// すべての状態変更がupdate関数を通る=
+// 「なぜこの画面になったか」はMsgの履歴で完全に追える`,
+      },
+      {
+        lang: "Kotlin",
+        code: `// Compose + ViewModel: UI状態をStateFlowで一元管理
+data class WatchListUiState(
+    val filter: String = "",
+    val companies: List<Company> = emptyList(),
+    val isLoading: Boolean = false,
+)
+
+class WatchListViewModel(
+    private val repo: CompanyRepository,
+) : ViewModel() {
+    private val _uiState = MutableStateFlow(WatchListUiState())
+    val uiState: StateFlow<WatchListUiState> = _uiState
+
+    fun onFilterChange(filter: String) {
+        _uiState.update { it.copy(filter = filter, isLoading = true) }
+        viewModelScope.launch {
+            val result = repo.search(filter)   // サーバー状態
+            _uiState.update {
+                it.copy(companies = result, isLoading = false)
+            }
+        }
+    }
+}
+// View(Composable)は uiState を描くだけ。
+// 変更は必ずViewModelのメソッド経由(単方向)`,
+      },
+      {
+        lang: "TypeScript",
+        code: `// React: 状態の分類ごとに道具を使い分ける
+
+// ① ローカル状態: useState(その部品に置く)
+const [isOpen, setIsOpen] = useState(false);
+
+// ② 共有状態: Context(本当に必要なものだけ)
+const UserContext = createContext<Employee | null>(null);
+
+// ③ サーバー状態: TanStack Query等に任せる
+function useCompanies(industry: string) {
+  return useQuery({
+    queryKey: ["companies", industry],
+    queryFn: () => companyApi.list(industry),
+    staleTime: 60_000,
+  });
+}
+
+function CompanyBoard({ industry }: { industry: string }) {
+  const { data, isLoading, error } = useCompanies(industry);
+  if (isLoading) return <Spinner />;
+  if (error) return <ErrorPanel error={error} />;
+  return <CompanyList companies={data} onSelect={openDetail} />;
+}
+// ローディング・エラー・キャッシュの手書き管理が消える`,
+      },
+    ],
+    domain: {
+      text: "経済情報ダッシュボードの状態を3分類で棚卸しした例です。分類すると「どの道具で管理すべきか」が自動的に決まります。",
+      code: `── 状態の棚卸し(経済情報ダッシュボード)──
+
+[① ローカル状態] → その部品のuseStateでよい
+  ・チャートの表示期間タブ(1日/1週/1年)
+  ・検索ボックスの入力途中の文字列
+  ・「もっと見る」の開閉
+
+[② 共有状態] → Context/軽量ストアに昇格
+  ・ログイン中の従業員(アナリスト)情報
+  ・表示テーマ(ライト/ダーク)
+  ・選択中の市場(東証/NASDAQ)
+
+[③ サーバー状態] → Query系ライブラリで管理
+  ・企業一覧・企業詳細(staleTime: 数分でOK)
+  ・株価(数秒で古くなる → WebSocket購読と併用)
+  ・ウォッチリスト(自分の操作+他端末からの変更)
+  ・決算カレンダー(1日1回の再取得で十分)
+
+── 分類の効能 ─────────────────────
+・「株価が古い」問題 → ③の再取得戦略の話と特定できる
+・「タブを切り替えたら全画面が再描画」
+  → ①を③と同じストアに入れていたのが原因と分かる
+・データごとに「どれくらい古くてよいか」を
+  staleTimeとして明文化でき、チームの共通認識になる`,
+    },
+  },
+
+  "rendering-strategies": {
+    title: "レンダリング戦略",
+    what: "「HTMLをいつ・どこで作るか」の選択です。CSR(クライアントサイドレンダリング)はブラウザのJSが描画——アプリ的な操作感に強いが初回表示が遅い。SSR(サーバーサイドレンダリング)はリクエストごとにサーバーがHTMLを生成——初回表示とSEOに強いがサーバー負荷が増す。SSG(静的サイト生成)はビルド時に作り置き——最速だが更新はビルド待ち。SSR/SSGでは、届いたHTMLにイベント処理を結び付けるハイドレーションという工程があり、「見えるのに押せない」時間を短くすることが性能設計の焦点になります。",
+    apply: {
+      text: "1つのサイトでも、ページの性質ごとに戦略を使い分けるのが現代の定石です。",
+      code: `── ページごとに戦略を使い分ける ──────────
+
+会社案内・ヘルプ(誰が見ても同じ・滅多に変わらない)
+  → SSG: ビルド時に生成、CDNから即配信
+
+企業詳細ページ(内容は共通だがデータは日々変わる)
+  → SSR(+キャッシュ): 検索エンジンにも内容が
+    見え、初回表示も速い
+
+ログイン後のダッシュボード(人によって全部違う)
+  → CSR: SEO不要。アプリ的な操作感を優先
+
+── ハイドレーションの時系列(SSR)─────────
+0ms    サーバーがHTMLを返す
+200ms  ユーザーに内容が見える(First Paint)
+       │ ← この間、ボタンは見えるが反応しない
+900ms  JSが読み込まれハイドレーション完了
+       → クリック可能に(Time to Interactive)
+
+この「見えるのに押せない」区間を縮めるため、
+・JSバンドルを小さく保つ(コード分割)
+・優先度の低い部品のハイドレーションを遅らせる
+といった工夫が生まれている`,
+    },
+    benefits: "・ページの性質(更新頻度・個人化・SEO要否)に合った配信で、体感速度を最大化できる\n・SSG/CDN配信はサーバー障害にも強い(静的ファイルは落ちにくい)\n・SSRによりSNSシェア時のOGPや検索エンジンへの露出を確保できる\n・戦略を意識すると「なぜこのページは遅いのか」を構造的に説明できるようになる",
+    langExamples: [
+      {
+        lang: "Rust",
+        code: `// Leptos: 同じコンポーネントをSSR+ハイドレーションで
+// 使える(サーバーもクライアントもRust)
+#[component]
+fn CompanyPage() -> impl IntoView {
+    // サーバーで実行され、結果ごとHTML化される
+    let company = create_resource(
+        || (),
+        |_| async { fetch_company("8001").await },
+    );
+
+    view! {
+        <Suspense fallback=|| view! { "…" }>
+            {move || company.get().map(|c| view! {
+                <h1>{c.name}</h1>
+            })}
+        </Suspense>
+    }
+}
+// cargo-leptosがSSRバイナリとWASM(ハイドレーション用)
+// を同じソースからビルドする。サーバーとブラウザで
+// 言語が同じ=ロジックの二重実装が要らない`,
+      },
+      {
+        lang: "F#",
+        code: `// Fable + Elmish のSSRの考え方
+// viewが純粋関数なので、サーバー側でも実行できる
+
+// サーバー(.NET): 初期Modelでviewを実行しHTML文字列に
+let html =
+    let initialModel = { Company = fetchCompany "8001" }
+    Server.renderToString (view initialModel ignore)
+
+// クライアント(Fable/JS): 同じviewでハイドレーション
+Program.mkProgram init update view
+|> Program.withReactHydrate "app"  // 既存DOMに結び付ける
+|> Program.run
+
+// MVUの「viewは Model -> Html の純粋関数」という
+// 性質が、SSRとの相性の良さに直結している`,
+      },
+      {
+        lang: "Kotlin",
+        code: `// Kotlin/JSと共有ロジック:
+// レンダリング戦略と「どこで計算するか」を分けて考える
+
+// commonMain: ドメインロジックはプラットフォーム共通
+// (サーバーでもブラウザでも同じ計算を使う)
+data class Company(val name: String, val marketCap: Long)
+
+fun formatMarketCap(c: Company): String =
+    (c.marketCap / 100_000_000).toString() + "億円"
+
+// jvmMain: サーバーサイドでHTMLを生成(kotlinx.html)
+fun companyHtml(c: Company) = createHTML().article {
+    h1 { +c.name }
+    p { +formatMarketCap(c) }   // 共有ロジックを利用
+}
+
+// jsMain: ブラウザ側の動的な振る舞いを担当
+// 表示の計算はどちら側でも同一(二重実装の排除)`,
+      },
+      {
+        lang: "TypeScript",
+        code: `// Next.js(React)での戦略の使い分け
+
+// SSG: ビルド時に生成(ヘルプページなど)
+//   → 何も書かなければ静的に最適化される
+export default function HelpPage() { /* ... */ }
+
+// SSR: リクエストごとにサーバーで取得・描画
+export default async function CompanyPage(
+  { params }: { params: { code: string } },
+) {
+  const company = await companyApi.fetch(params.code);
+  return <CompanyDetail company={company} />;  // Server Component
+}
+
+// CSR: 操作の多い部分だけクライアント部品に
+"use client";
+export function PriceChartPanel({ code }: { code: string }) {
+  const price = useStockPrice(code);  // WebSocket購読
+  return <Chart data={price} />;
+}
+// 「ページ単位」でなく「部品単位」で戦略を混ぜられる
+// のが最近のフレームワークの方向性`,
+      },
+    ],
+    domain: {
+      text: "経済情報サイト全体を、ページの性質に応じてレンダリング戦略を割り当てた設計例です。",
+      code: `── 経済情報サイトの戦略マップ ────────────
+
+/help, /about(サービス案内)
+  戦略: SSG
+  理由: 全員同じ・更新は月1回 → CDNで世界中に即配信
+
+/companies/8001(企業詳細・公開ページ)
+  戦略: SSR + CDNキャッシュ(60秒)
+  理由: 検索エンジンからの流入が生命線。
+        株価は60秒古くても許容(注記を出す)
+
+/news/xxxx(ニュース記事)
+  戦略: SSG + 差分再生成
+  理由: 公開後はほぼ不変。記事公開時だけ再生成
+
+/dashboard(ログイン後・従業員ごとに違う)
+  戦略: CSR(シェル部分はSSG)
+  理由: 個人のウォッチリスト・担当企業一覧は
+        SEO不要。リアルタイム株価はWebSocketで購読
+
+/screener(条件を細かく操作する検索画面)
+  戦略: CSR
+  理由: 操作のたびにサーバー描画では遅すぎる
+
+── 判断基準のまとめ ──────────────────
+誰が見ても同じ? → YES: SSG / NO: ↓
+検索エンジンに見せたい? → YES: SSR / NO: CSR
+どれくらい古くてよい? → キャッシュ時間に反映`,
+    },
+  },
+
+  "api-layer": {
+    title: "API層の分離とBFF",
+    what: "コンポーネントの中にfetchを直書きすると、エンドポイントの変更が全ファイルに波及し、テストには本物のAPIが必要になります。通信の詳細(URL・認証・リトライ・エラー変換)は専用のAPI層に集約し、コンポーネントは「何が欲しいか」だけを宣言します(DIPのフロントエンド版)。さらに、画面に必要なデータが複数のバックエンドサービスに散らばっている場合は、BFF(Backend For Frontend)——フロントエンド専用の中間サーバー——が集約・変換を担い、「画面が欲しい形」で1往復で返します。",
+    apply: {
+      text: "fetch直書きをAPI層に集約し、コンポーネントを通信の詳細から切り離します。",
+      code: `── ❌ コンポーネントにfetch直書き ──────────
+function CompanyCard({ code }) {
+  useEffect(() => {
+    fetch("https://api.example.com/v1/companies/" + code, {
+      headers: { Authorization: "Bearer " + getToken() },
+    }).then(/* ... */);
+  }, [code]);
+  // URL変更・v2移行・認証方式変更のたびに
+  // 全コンポーネントを修正する羽目に
+}
+
+── ✅ API層に集約 ─────────────────────
+// api/client.ts: 通信の共通事項を1箇所に
+const client = createClient({
+  baseUrl: import.meta.env.VITE_API_URL,
+  auth: () => getToken(),
+  retry: 2,
+});
+
+// api/companyApi.ts: エンドポイントの知識はここだけ
+export const companyApi = {
+  fetch: (code: string) =>
+    client.get<Company>("/companies/" + code),
+  search: (q: CompanyQuery) =>
+    client.get<Company[]>("/companies", { params: q }),
+};
+
+// コンポーネント側: 「何が欲しいか」だけを書く
+const { data } = useQuery({
+  queryKey: ["company", code],
+  queryFn: () => companyApi.fetch(code),
+});
+// テストではcompanyApiをモックに差し替えるだけ`,
+    },
+    benefits: "・エンドポイント・認証・エラー処理の変更が1箇所で完結する\n・コンポーネントのテストでAPIモックへの差し替えが容易になる\n・BFFにより「画面表示に5つのAPIを何往復も呼ぶ」問題が1往復に減る\n・APIレスポンスの型変換(snake_case→camelCase等)を境界で吸収でき、アプリ内部が綺麗に保てる",
+    langExamples: [
+      {
+        lang: "Rust",
+        code: `// Leptosのサーバー関数: API層をコンパイラが生成
+// (クライアント/サーバーの境界を型安全に越える)
+#[server]
+async fn get_company_snapshot(
+    code: String,
+) -> Result<Snapshot, ServerFnError> {
+    // この中身はサーバーでだけ実行される(BFF相当)
+    let company = company_service::fetch(&code).await?;
+    let price = price_service::latest(&code).await?;
+    let news = news_service::top(&code, 3).await?;
+    Ok(Snapshot { company, price, news }) // 画面が欲しい形に集約
+}
+
+// クライアント側は普通の関数呼び出しに見える
+let snapshot = create_resource(
+    move || code.get(),
+    |code| get_company_snapshot(code),
+);
+// URL・シリアライズ・エラー変換はフレームワークが担当`,
+      },
+      {
+        lang: "F#",
+        code: `// Fable.Remoting: 型でAPI契約を共有する
+// (クライアントとサーバーが同じF#の型を参照)
+
+// Shared.fs: 契約(どちらのプロジェクトからも参照)
+type ICompanyApi = {
+    getSnapshot: string -> Async<Snapshot>
+    search: CompanyQuery -> Async<Company list>
+}
+
+// Client.fs: 契約から型安全なクライアントを生成
+let api =
+    Remoting.createApi ()
+    |> Remoting.buildProxy<ICompanyApi>
+
+let load code = async {
+    let! snapshot = api.getSnapshot code  // ただの関数呼び出し
+    return snapshot
+}
+// エンドポイントのタイポやレスポンス型の食い違いが
+// コンパイルエラーになる=API層のバグが激減する`,
+      },
+      {
+        lang: "Kotlin",
+        code: `// Retrofit + Repositoryパターン: 通信の詳細を隠す
+
+// API定義: エンドポイントの知識はここだけ
+interface CompanyApi {
+    @GET("companies/{code}")
+    suspend fun fetch(@Path("code") code: String): CompanyDto
+
+    @GET("companies/{code}/prices/latest")
+    suspend fun latestPrice(@Path("code") code: String): PriceDto
+}
+
+// Repository: DTOをドメインの形に変換して返す(境界で吸収)
+class CompanyRepository(private val api: CompanyApi) {
+    suspend fun snapshot(code: String): CompanySnapshot =
+        coroutineScope {
+            val company = async { api.fetch(code) }
+            val price = async { api.latestPrice(code) }
+            CompanySnapshot(
+                name = company.await().companyName,
+                price = price.await().lastPx,   // 画面が欲しい形へ
+            )
+        }
+}
+// ViewModelはRepositoryだけを知り、通信の詳細を知らない`,
+      },
+      {
+        lang: "TypeScript",
+        code: `// BFF(Backend For Frontend)の実装イメージ
+// フロントチームが所有する薄い集約サーバー
+
+// bff/routes/companySnapshot.ts
+app.get("/bff/companies/:code/snapshot", async (req, res) => {
+  const code = req.params.code;
+
+  // バックエンドの複数サービスを並列で呼び、集約
+  const [company, price, news] = await Promise.all([
+    companyService.fetch(code),     // 企業情報サービス
+    priceService.latest(code),      // 株価サービス
+    newsService.top(code, 3),       // ニュースサービス
+  ]);
+
+  // 画面がそのまま描ける形に変換して1回で返す
+  res.json({
+    name: company.name,
+    price: price.value,
+    priceFormatted: price.value.toLocaleString("ja-JP") + "円",
+    headlines: news.map(n => ({ id: n.id, title: n.title })),
+  });
+});
+// ブラウザ↔サーバーの往復が3回→1回に。
+// モバイル回線のユーザーほど効果が大きい`,
+      },
+    ],
+    domain: {
+      text: "経済情報ダッシュボードの企業詳細画面で、BFFがあるときとないときの通信の違いです。マイクロサービス化されたバックエンドとフロントエンドの間を、BFFが取り持ちます。",
+      code: `── BFFなし: ブラウザが直接3サービスへ ──────
+ブラウザ → 企業情報サービス(基本情報)   180ms
+ブラウザ → 株価サービス(現在値)         150ms
+ブラウザ → ニュースサービス(関連3件)     200ms
+・モバイル回線では往復ごとに遅延が積み重なる
+・各サービスのレスポンス形式の違い
+  (snake_case、金額の単位)をブラウザ側で吸収
+・APIの数だけ認証・エラー処理をフロントに実装
+
+── BFFあり: 集約された1エンドポイント ──────
+ブラウザ → BFF /bff/companies/8001/snapshot  1往復
+            └→ BFFがデータセンター内で3サービスを
+               並列に呼んで集約(内部は数ms〜数十ms)
+
+レスポンス(画面がそのまま描ける形):
+{
+  "name": "アクメ商事",
+  "priceFormatted": "3,450円",
+  "isStale": false,
+  "headlines": [...],
+  "analyst": { "name": "佐藤" }   // 担当従業員も同梱
+}
+
+── BFFの持ち主 ─────────────────────
+BFFはフロントエンドチームが所有する。
+「画面の都合による変更」を、バックエンド各チームに
+依頼せず自分たちで完結できるのが最大の利点`,
+    },
+  },
+
+  "frontend-performance": {
+    title: "フロントエンドパフォーマンス",
+    what: "フロントエンドの性能は主に2つの局面で決まります。①初期ロード——バンドルサイズが支配的で、コード分割(ルート・機能単位で分ける)と遅延読み込み(必要になってから読む)で改善します。②実行時——不要な再レンダリングが主犯で、状態のコロケーションとメモ化(変わらない部品の再計算スキップ)で抑えます。大原則は「計測してから最適化する」——Core Web Vitals(LCP・INP・CLS)やプロファイラで犯人を特定してから手を打ちます。推測による最適化はコードを複雑にするだけのことが多いのです。",
+    apply: {
+      text: "初期ロードと実行時、それぞれの典型的な改善例です。",
+      code: `── ① 初期ロード: コード分割と遅延読み込み ────
+// ❌ 全画面のコードを1つのバンドルに
+import { ScreenerPage } from "./screener";  // 800KB
+import { AdminPage } from "./admin";        // 使う人は1%
+
+// ✅ ルート単位で分割し、必要時に読み込む
+const ScreenerPage = lazy(() => import("./screener"));
+const AdminPage = lazy(() => import("./admin"));
+// 初回バンドルは「最初の画面に必要な分」だけに
+
+── ② 実行時: 再レンダリングの抑制 ──────────
+// ❌ 1秒ごとの株価更新で、1000行のテーブル全体を再描画
+function Board({ prices }) {
+  return rows.map(r => <Row {...r} price={prices[r.code]} />);
+}
+
+// ✅ 行をメモ化し、価格が変わった行だけ再描画
+const Row = memo(function Row({ name, price }) {
+  return <tr><td>{name}</td><td>{price}</td></tr>;
+});
+// 1銘柄の更新で再描画されるのは1行だけになる
+
+── 大原則 ───────────────────────
+計測 → 犯人特定 → 対策 → 再計測。
+プロファイラを見ずにmemoを撒くのは複雑化のもと`,
+    },
+    benefits: "・初期表示の高速化は直帰率・SEO(Core Web Vitals)に直接効く\n・再レンダリング抑制で、リアルタイム更新の多い画面でも操作がなめらかに保てる\n・「計測してから」の習慣により、効果のない複雑化(早すぎる最適化)を避けられる\n・遅延読み込みは初期表示だけでなく、通信量(モバイルユーザーの体験)にも効く",
+    langExamples: [
+      {
+        lang: "Rust",
+        code: `// WASM(Leptos/Yew)の性能特性
+
+// 強み: 細粒度リアクティビティ
+// Leptosは仮想DOMを持たず、シグナルが変わった
+// 箇所のDOMだけを直接更新する
+let (price, set_price) = create_signal(3450.0);
+view! { <td>{move || price.get()}</td> }
+// ← priceが変わってもこの<td>のテキストしか触らない
+//   (「再レンダリング範囲」という概念自体が小さい)
+
+// 注意点: WASMバイナリのサイズ
+// 初期ロードではJSよりバイナリが大きくなりがち。
+// - wasm-opt / releaseビルドでの縮小
+// - 機能単位の分割ロード
+// を前提に設計する。「実行は速いが初回は重い」
+// というトレードオフを理解して選ぶ`,
+      },
+      {
+        lang: "F#",
+        code: `// Elmish(MVU)での性能の考え方
+
+// MVUは「全体を再計算して差分適用」が基本のため、
+// 大きなリストでは lazyView で再計算をスキップする
+open Elmish.React
+
+let row = lazyView (fun (company: Company) ->
+    Html.tr [
+        Html.td [ prop.text company.Name ]
+        Html.td [ prop.text (string company.Price) ]
+    ])
+// companyが前回と同じ(構造的等価)なら
+// view関数の再実行そのものを省略する
+
+// F#のレコードは不変なので「変わった/変わらない」の
+// 判定が信頼できる=メモ化と本質的に相性が良い。
+// 可変オブジェクトの「同じに見えて中身が違う」事故がない`,
+      },
+      {
+        lang: "Kotlin",
+        code: `// Composeの再コンポーズ最適化
+
+// 1. 安定した型: 不変データなら賢くスキップされる
+@Immutable                       // 「変わらない」と宣言
+data class CompanyRow(val code: String, val name: String)
+
+// 2. LazyColumn + key: リストの差分更新を助ける
+LazyColumn {
+    items(rows, key = { it.code }) { row ->
+        PriceRow(row)   // 変わった行だけ再コンポーズ
+    }
+}
+
+// 3. 読み取りの遅延: ラムダで渡すと
+//    「値を実際に読む場所」だけが再実行される
+Text(text = priceText)              // ← 広く再コンポーズ
+Text(text = { priceText.value }())  // ← 考え方の例示
+
+// Layout Inspectorで再コンポーズ回数を計測してから
+// 手を打つ、が鉄則なのはWebと同じ`,
+      },
+      {
+        lang: "TypeScript",
+        code: `// React: 計測→対策の道具箱
+
+// 計測: Profiler / Core Web Vitals
+import { onLCP, onINP } from "web-vitals";
+onLCP(console.log);  // 最大コンテンツの表示時刻
+onINP(console.log);  // 操作への応答性
+
+// 対策1: ルート単位のコード分割
+const Screener = lazy(() => import("./pages/Screener"));
+
+// 対策2: 行のメモ化(propsが同じなら再描画スキップ)
+const PriceRow = memo(function PriceRow(
+  { name, price }: { name: string; price: number },
+) {
+  return <tr><td>{name}</td><td>{price}</td></tr>;
+});
+
+// 対策3: 重い計算のメモ化
+const sorted = useMemo(
+  () => [...companies].sort(byMarketCap),
+  [companies],
+);
+
+// 対策4: 巨大リストは仮想化(見えている行だけ描画)
+// react-window等で1万行→描画は30行だけに`,
+      },
+    ],
+    domain: {
+      text: "「決算シーズンにダッシュボードが重い」というアナリスト(従業員)の声への、計測から始まる改善の実例です。",
+      code: `── 改善プロジェクト: ダッシュボードが重い ────
+
+1. 計測(推測しない)
+   ・LCP 4.8秒(目標2.5秒)← 初期ロードが重い
+   ・株価更新のたびINPが悪化 ← 再レンダリング過多
+   ・バンドル分析: チャートライブラリが全体の45%
+
+2. 初期ロードの改善
+   ・チャートを遅延読み込みに
+     const Chart = lazy(() => import("./Chart"));
+     → 企業一覧を見るだけの人はチャートを読まない
+   ・管理画面(利用者は社内従業員の2%)を別チャンクに
+   → LCP 4.8秒 → 2.1秒
+
+3. 実行時の改善
+   ・犯人: 1銘柄の株価更新でウォッチリスト
+     全300行が再描画されていた
+   ・対策: 行をmemo化+価格だけを購読する設計に
+     (行コンポーネントが自分の銘柄だけsubscribe)
+   → 再描画: 300行 → 1行。スクロールが滑らかに
+
+4. 再計測と見張り
+   ・Core Web VitalsをCIで継続計測
+   ・「バンドル+10%でCI警告」を設定
+   → 改善が退行しない仕組みまでがパフォーマンス改善`,
     },
   },
 };
